@@ -1,0 +1,49 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+*.test
+bin/
+dist/
+
+# Go build artifacts
+*.a
+*.o
+*.obj
+__debug_bin
+
+# Go workspace
+go.work
+go.work.sum
+
+# Vendor (ignore if you vendor deps; remove this if you commit vendor/)
+vendor/
+
+# Env files
+.env
+.env.*
+
+# Logs
+*.log
+
+# IDE / Editor junk
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# OS garbage
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage.out
+*.coverprofile
+
+# Gin / hot reload tools (air, gin, etc.)
+tmp/
+.air.toml
