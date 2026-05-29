@@ -100,64 +100,6 @@ type ScheduleGenerationResult struct {
 	Progress []GAProgressSnapshot `json:"progress,omitempty"`
 }
 
-// ScheduleDiffResult describes whether generated GA output matches the mapped real schedule.
-type ScheduleDiffResult struct {
-	Checked           bool   `json:"checked"`
-	Reason            string `json:"reason,omitempty"`
-	IsSame            bool   `json:"isSame"`
-	GeneratedCount    int    `json:"generatedCount"`
-	RealScheduleCount int    `json:"realScheduleCount"`
-}
-
-// ScheduleGenerateAndCompareResult returns GA generation details plus comparison output.
-type ScheduleGenerateAndCompareResult struct {
-	Generation *ScheduleGenerationResult `json:"generation"`
-	Comparison ScheduleDiffResult        `json:"comparison"`
-}
-
-// RealScheduleValidationResult reports violation metrics when evaluating
-// the mapped real schedule directly, without GA optimization.
-type RealScheduleValidationResult struct {
-	Entries []ScheduleEntry `json:"entries"`
-	Meta    struct {
-		Input        InputStats  `json:"input"`
-		Result       ResultStats `json:"result"`
-		SeedWarnings []string    `json:"seedWarnings,omitempty"`
-		IsFeasible   bool        `json:"isFeasible"`
-	} `json:"meta"`
-}
-
-// SATrialResult holds before/after metrics for one SA-only diagnostic trial.
-type SATrialResult struct {
-	Trial            int         `json:"trial"`
-	Seed             int64       `json:"seed"`
-	GreedyViolations int         `json:"greedyViolations"`
-	GreedyUnplaced   int         `json:"greedyUnplaced"`
-	GreedyBreakdown  GABreakdown `json:"greedyBreakdown"`
-	FinalViolations  int         `json:"finalViolations"`
-	FinalUnplaced    int         `json:"finalUnplaced"`
-	FinalBreakdown   GABreakdown `json:"finalBreakdown"`
-	ReachedZero      bool        `json:"reachedZero"`
-}
-
-// SADiagnosticResult is the full response from the SA-only diagnostic endpoint.
-type SADiagnosticResult struct {
-	Input   InputStats      `json:"input"`
-	Trials  []SATrialResult `json:"trials"`
-	Summary struct {
-		TrialCount           int     `json:"trialCount"`
-		SAIterationsPerTrial int     `json:"saIterationsPerTrial"`
-		SuccessCount         int     `json:"successCount"`
-		SuccessRate          float64 `json:"successRate"`
-		MeanGreedyViolations float64 `json:"meanGreedyViolations"`
-		MeanGreedyUnplaced   float64 `json:"meanGreedyUnplaced"`
-		MeanFinalViolations  float64 `json:"meanFinalViolations"`
-		MeanFinalUnplaced    float64 `json:"meanFinalUnplaced"`
-		MinFinalViolations   int     `json:"minFinalViolations"`
-		MinFinalUnplaced     int     `json:"minFinalUnplaced"`
-	} `json:"summary"`
-}
-
 // GAParameterSpec documents one tunable GA parameter.
 type GAParameterSpec struct {
 	Name        string `json:"name"`

@@ -5,21 +5,14 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"smp_mater_dei_be/internal/algorithm"
-	"smp_mater_dei_be/internal/classes"
 	"smp_mater_dei_be/internal/platform/config"
 	"smp_mater_dei_be/internal/subjects"
-	"smp_mater_dei_be/internal/teachers"
 	teachingassignments "smp_mater_dei_be/internal/teaching_assignments"
 )
 
-type timeRange struct {
-	start string
-	end   string
-}
 
 type GenerateScheduleOptions struct {
 	Params              GAParams
@@ -112,178 +105,7 @@ func GAParameterSpecs() []GAParameterSpec {
 	}
 }
 
-func GenerateSchedule() ([]ScheduleEntry, error) {
-	result, err := GenerateV3Schedule(GenerateHybridOptions{
-		GA: DefaultGAParams(),
-		TS: DefaultTSParams(),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result.Generation.Entries, nil
-}
-
-func EvaluateRealScheduleBaseline() (*RealScheduleValidationResult, error) {
-	pjokID, err := findPJOKSubjectID()
-	if err != nil {
-		return nil, err
-	}
-
-	sbpID, err := findSBPSubjectID()
-	if err != nil {
-		return nil, err
-	}
-
-	teacherNumberMap, err := buildTeacherNumberMap()
-	if err != nil {
-		return nil, err
-	}
-
-	classNameMap, err := buildActiveClassNameMap()
-	if err != nil {
-		return nil, err
-	}
-
-	subjectByTeacher, err := buildSubjectByTeacherNumberMap()
-	if err != nil {
-		return nil, err
-	}
-
-	opts := algorithm.RealScheduleMatrixOptions{
-		TeacherNumberToID:      teacherNumberMap,
-		ClassNameToID:          classNameMap,
-		SubjectByTeacherNumber: subjectByTeacher,
-		SBPSubjectID:           sbpID,
-	}
-
-	matrixResult, err := algorithm.BuildRealScheduleMatrix(opts)
-	if err != nil {
-		return nil, err
-	}
-
-	entries := buildEntriesFromMatrix(matrixResult.Blocks, matrixResult.Matrix, nil)
-	softBd := algorithm.BreakdownSoftViolations(matrixResult.Matrix, matrixResult.Blocks, pjokID)
-	softTotal := softBd.SameDaySplit + softBd.PJOKAfterDeadline*3
-	unplaced := len(matrixResult.Blocks) - len(matrixResult.Placements)
-
-	result := &RealScheduleValidationResult{Entries: entries}
-	result.Meta.Input = InputStats{
-		Blocks: len(matrixResult.Blocks),
-		Units:  len(matrixResult.Blocks),
-	}
-	result.Meta.Result = ResultStats{
-		EntriesGenerated: len(entries),
-		Violations:       softTotal,
-		Unplaced:         unplaced,
-		SoftBreakdown: SoftBreakdown{
-			SameDaySplit:      softBd.SameDaySplit,
-			PJOKAfterDeadline: softBd.PJOKAfterDeadline,
-		},
-	}
-	result.Meta.IsFeasible = unplaced == 0 && softTotal == 0
-
-	return result, nil
-}
-
-// computeSoftBreakdownFromEntries evaluates soft violations from a ScheduleEntry slice.
-// Mirrors CountSoftViolations logic but operates on time-string entries instead of a ScheduleMatrix.
-//
-// Block boundaries are detected by slot index gaps, not time gaps. This is critical because
-// the school timetable has a morning break (slots 2→3: 09:10→09:30) and a lunch break
-// (slots 5→6: 11:30→11:45) where consecutive-slot blocks produce non-consecutive times.
-// Using time-gap detection would incorrectly split those blocks and inflate SameDaySplit.
-func computeSoftBreakdownFromEntries(entries []ScheduleEntry, pjokSubjectID uint) SoftBreakdown {
-	var bd SoftBreakdown
-	daySlots := algorithm.GenerateSlots()
-
-	// end-time lookup: day → slotIndex → endTime (for PJOK deadline check)
-	slotEndTime := make(map[string]map[int]string, len(daySlots))
-	for day, slots := range daySlots {
-		m := make(map[int]string, len(slots))
-		for _, s := range slots {
-			m[s.Index] = s.EndTime
-		}
-		slotEndTime[day] = m
-	}
-
-	type groupKey struct {
-		classID   uint
-		subjectID uint
-		day       string
-	}
-	type slotEntry struct {
-		idx int
-		e   ScheduleEntry
-	}
-
-	byGroup := make(map[groupKey][]slotEntry, len(entries))
-	for _, e := range entries {
-		idx, ok := algorithm.MatrixSlotIndexFromTimeStart(e.Day, e.TimeStart, daySlots)
-		if !ok {
-			continue
-		}
-		k := groupKey{e.ClassID, e.SubjectID, e.Day}
-		byGroup[k] = append(byGroup[k], slotEntry{idx, e})
-	}
-	for k := range byGroup {
-		g := byGroup[k]
-		sort.Slice(g, func(i, j int) bool { return g[i].idx < g[j].idx })
-		byGroup[k] = g
-	}
-
-	// Count distinct blocks per (classID, subjectID, day).
-	// A new block starts whenever there is a gap in slot indices.
-	type subjectKey struct {
-		classID   uint
-		subjectID uint
-	}
-	dayBlocks := make(map[subjectKey]map[string]int)
-	for k, es := range byGroup {
-		sk := subjectKey{k.classID, k.subjectID}
-		if dayBlocks[sk] == nil {
-			dayBlocks[sk] = make(map[string]int)
-		}
-		count := 1
-		for i := 1; i < len(es); i++ {
-			if es[i].idx != es[i-1].idx+1 {
-				count++
-			}
-		}
-		dayBlocks[sk][k.day] += count
-	}
-
-	// Same-day split (weight 1, PJOK excluded)
-	for sk, dm := range dayBlocks {
-		if sk.subjectID == pjokSubjectID {
-			continue
-		}
-		for _, n := range dm {
-			if n > 1 {
-				bd.SameDaySplit += n - 1
-			}
-		}
-	}
-
-	// PJOK after deadline (weight 3): pairs of consecutive slot indices = one 2-JP block.
-	// Check the end time of the second slot against the 10:50 deadline.
-	for k, es := range byGroup {
-		if k.subjectID != pjokSubjectID {
-			continue
-		}
-		for i := 0; i < len(es)-1; i++ {
-			if es[i+1].idx == es[i].idx+1 {
-				if endTime := slotEndTime[k.day][es[i+1].idx]; endTime > "10:50" {
-					bd.PJOKAfterDeadline++
-				}
-				i++ // consume the pair
-			}
-		}
-	}
-
-	return bd
-}
-
-// ── V2 schedule generation (new matrix-based GA) ─────────────────────────────
+// ── Schedule generation context ──────────────────────────────────────────────
 
 func buildNewScheduleContext() (*newScheduleBuildContext, error) {
 	assignments, err := findActiveAssignments()
@@ -324,79 +146,6 @@ func buildNewScheduleContext() (*newScheduleBuildContext, error) {
 			ActiveClasses:     len(classSet),
 			Teachers:          len(teacherSet),
 		},
-	}, nil
-}
-
-func GenerateV2Schedule(opts GenerateScheduleOptions) (*ScheduleGenerateAndCompareResult, error) {
-	if isZeroGAParams(opts.Params) {
-		opts.Params = DefaultGAParams()
-	}
-	opts.Params = ensureSeed(opts.Params)
-	if err := validateGAParams(opts.Params); err != nil {
-		return nil, err
-	}
-
-	ctx, err := buildNewScheduleContext()
-	if err != nil {
-		return nil, err
-	}
-
-	cfg := algorithm.DefaultGAConfig()
-	cfg.PopulationSize = opts.Params.PopulationSize
-	cfg.Generations = opts.Params.Generations
-	cfg.MutationRate = opts.Params.MutationRate
-	cfg.EliteCount = opts.Params.EliteCount
-	cfg.TournamentSize = opts.Params.TournamentSize
-	cfg.Seed = opts.Params.Seed
-	cfg.ProgressEvery = opts.Params.ProgressEvery
-	cfg.PJOKSubjectID = ctx.pjokID
-	cfg.OnProgress = func(p algorithm.GAProgress) {
-		if opts.OnProgress != nil {
-			opts.OnProgress(toV2ProgressSnapshot(p, opts.Params.Generations))
-		}
-	}
-
-	gaResult := algorithm.RunGA(ctx.blocks, ctx.index, nil, cfg)
-	entries := buildEntriesFromMatrix(ctx.blocks, gaResult.Matrix, nil)
-	gaSoftBd := algorithm.BreakdownSoftViolations(gaResult.Matrix, ctx.blocks, ctx.pjokID)
-
-	generationResult := &ScheduleGenerationResult{
-		Entries: entries,
-		Meta: ScheduleMeta{
-			Input:       ctx.input,
-			DefaultGA:   DefaultGAParams(),
-			EffectiveGA: opts.Params,
-			Result: ResultStats{
-				EntriesGenerated: len(entries),
-				BestFitness:      gaResult.Unplaced,
-				Violations:       gaResult.SoftViolations,
-				Unplaced:         gaResult.Unplaced,
-				SoftBreakdown: SoftBreakdown{
-					SameDaySplit:        gaSoftBd.SameDaySplit,
-					SameDaySplitGrouped: gaSoftBd.SameDaySplitGrouped,
-					PJOKAfterDeadline:   gaSoftBd.PJOKAfterDeadline,
-				},
-			},
-		},
-	}
-
-	comparison := ScheduleDiffResult{
-		Checked:        false,
-		Reason:         "comparison skipped: schedule has unplaced blocks",
-		GeneratedCount: len(entries),
-	}
-
-	if gaResult.Unplaced == 0 {
-		realBaseline, err := EvaluateRealScheduleBaseline()
-		if err != nil {
-			return nil, err
-		}
-		comparison = compareScheduleEntries(entries, realBaseline.Entries)
-	}
-
-	return &ScheduleGenerateAndCompareResult{
-		Generation: generationResult,
-		Comparison: comparison,
 	}, nil
 }
 
@@ -472,7 +221,7 @@ func DefaultTSParams() TSParams {
 	}
 }
 
-func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerateAndCompareResult, error) {
+func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, error) {
 	gaParams := opts.GA
 	if isZeroGAParams(gaParams) {
 		gaParams = DefaultGAParams()
@@ -574,96 +323,10 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerateAndCompare
 		},
 	}
 
-	comparison := ScheduleDiffResult{
-		Checked:        false,
-		Reason:         "comparison skipped because schedule still has unplaced blocks",
-		GeneratedCount: len(entries),
-	}
-
-	if hybridResult.Unplaced == 0 {
-		realBaseline, err := EvaluateRealScheduleBaseline()
-		if err != nil {
-			return nil, err
-		}
-		comparison = compareScheduleEntries(entries, realBaseline.Entries)
-	}
-
-	return &ScheduleGenerateAndCompareResult{
-		Generation: generationResult,
-		Comparison: comparison,
-	}, nil
+	return generationResult, nil
 }
 
 // GenerateV3ScheduleReadable runs the hybrid GA+SA and returns the schedule with
-// human-readable teacher/subject/class names instead of IDs.
-// Entries are sorted by class name → day (Monday first) → time.
-func GenerateV3ScheduleReadable(opts GenerateHybridOptions) (*ReadableScheduleResult, error) {
-	result, err := GenerateV3Schedule(opts)
-	if err != nil {
-		return nil, err
-	}
-
-	var teacherRows []teachers.Teacher
-	if err := config.DB.Find(&teacherRows).Error; err != nil {
-		return nil, err
-	}
-	teacherNames := make(map[uint]string, len(teacherRows))
-	for _, t := range teacherRows {
-		teacherNames[t.ID] = t.FullName
-	}
-
-	var subjectRows []subjects.Subject
-	if err := config.DB.Find(&subjectRows).Error; err != nil {
-		return nil, err
-	}
-	subjectNames := make(map[uint]string, len(subjectRows))
-	for _, s := range subjectRows {
-		subjectNames[s.ID] = s.Name
-	}
-
-	var classRows []classes.Class
-	if err := config.DB.Where("is_active = ?", true).Find(&classRows).Error; err != nil {
-		return nil, err
-	}
-	classNames := make(map[uint]string, len(classRows))
-	for _, cl := range classRows {
-		classNames[cl.ID] = cl.Name
-	}
-
-	entries := result.Generation.Entries
-	readable := make([]ReadableScheduleEntry, 0, len(entries))
-	for _, e := range entries {
-		re := ReadableScheduleEntry{
-			ClassName:   classNames[e.ClassID],
-			SubjectName: subjectNames[e.SubjectID],
-			Day:         e.Day,
-			TimeStart:   e.TimeStart,
-			TimeEnd:     e.TimeEnd,
-		}
-		if e.TeacherID != nil {
-			re.TeacherName = teacherNames[*e.TeacherID]
-		}
-		readable = append(readable, re)
-	}
-
-	sort.Slice(readable, func(i, j int) bool {
-		if readable[i].ClassName != readable[j].ClassName {
-			return readable[i].ClassName < readable[j].ClassName
-		}
-		di := algorithm.MatrixDayIndex(readable[i].Day)
-		dj := algorithm.MatrixDayIndex(readable[j].Day)
-		if di != dj {
-			return di < dj
-		}
-		return readable[i].TimeStart < readable[j].TimeStart
-	})
-
-	return &ReadableScheduleResult{
-		Entries: readable,
-		Meta:    result.Generation.Meta,
-	}, nil
-}
-
 func toTSProgressSnapshot(p algorithm.TSProgress, totalIterations int) TSProgressSnapshot {
 	percent := 0.0
 	if totalIterations > 0 {
@@ -708,209 +371,7 @@ func findPJOKSubjectID() (uint, error) {
 	return s.ID, nil
 }
 
-func findSBPSubjectID() (uint, error) {
-	var s subjects.Subject
-	err := config.DB.Where("name = ?", "Seni Budaya").First(&s).Error
-	if err != nil {
-		return 0, err
-	}
-	return s.ID, nil
-}
-
-func buildTeacherNumberMap() (map[string]uint, error) {
-	var rows []teachers.Teacher
-	if err := config.DB.Find(&rows).Error; err != nil {
-		return nil, err
-	}
-
-	out := make(map[string]uint, len(rows))
-	for _, t := range rows {
-		out[strconv.Itoa(t.TeacherNumber)] = t.ID
-	}
-
-	return out, nil
-}
-
-func buildActiveClassNameMap() (map[string]uint, error) {
-	var rows []classes.Class
-	err := config.DB.Where("is_active = ?", true).Find(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-
-	out := make(map[string]uint, len(rows))
-	for _, c := range rows {
-		out[c.Name] = c.ID
-	}
-
-	return out, nil
-}
-
-func buildSubjectByTeacherNumberMap() (map[string]uint, error) {
-	type row struct {
-		TeacherNumber int  `gorm:"column:teacher_number"`
-		SubjectID     uint `gorm:"column:subject_id"`
-	}
-	var rows []row
-	err := config.DB.
-		Table("teaching_assignments ta").
-		Select("t.teacher_number, ta.subject_id").
-		Joins("JOIN teachers t ON t.id = ta.teacher_id").
-		Where("ta.deleted_at IS NULL").
-		Where("ta.teacher_id IS NOT NULL").
-		Scan(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]uint, len(rows))
-	for _, r := range rows {
-		out[strconv.Itoa(r.TeacherNumber)] = r.SubjectID
-	}
-	return out, nil
-}
-
-// ── Diagnostic routes ─────────────────────────────────────────────────────────
-
-type MatrixSlotDiagnostic struct {
-	Days  []string                    `json:"days"`
-	Slots map[string][]algorithm.Slot `json:"slots"`
-}
-
-func GetMatrixSlotsDiagnostic() MatrixSlotDiagnostic {
-	return MatrixSlotDiagnostic{
-		Days:  algorithm.MatrixDays,
-		Slots: algorithm.GenerateSlots(),
-	}
-}
-
-type MatrixBlockDiagnosticItem struct {
-	ID            uint   `json:"id"`
-	ClassID       uint   `json:"class_id"`
-	ClassName     string `json:"class_name"`
-	TeacherID     *uint  `json:"teacher_id"`
-	TeacherNumber *int   `json:"teacher_number,omitempty"`
-	TeacherName   string `json:"teacher_name,omitempty"`
-	SubjectID     uint   `json:"subject_id"`
-	SubjectName   string `json:"subject_name"`
-	Duration      int    `json:"duration"`
-}
-
-type ClassBlockSummary struct {
-	ClassID    uint   `json:"class_id"`
-	ClassName  string `json:"class_name"`
-	BlockCount int    `json:"block_count"`
-	TotalJP    int    `json:"total_jp"`
-}
-
-type MatrixBlocksDiagnostic struct {
-	TotalBlocks int                         `json:"total_blocks"`
-	TotalJP     int                         `json:"total_jp"`
-	ByClass     []ClassBlockSummary         `json:"by_class"`
-	Blocks      []MatrixBlockDiagnosticItem `json:"blocks"`
-}
-
-func GetMatrixBlocksDiagnostic() (*MatrixBlocksDiagnostic, error) {
-	ctx, err := buildNewScheduleContext()
-	if err != nil {
-		return nil, err
-	}
-
-	// build teacher lookup: id → (number, name)
-	var teacherRows []teachers.Teacher
-	if err := config.DB.Find(&teacherRows).Error; err != nil {
-		return nil, err
-	}
-	type teacherInfo struct {
-		number int
-		name   string
-	}
-	teacherLookup := make(map[uint]teacherInfo, len(teacherRows))
-	for _, t := range teacherRows {
-		teacherLookup[t.ID] = teacherInfo{number: t.TeacherNumber, name: t.FullName}
-	}
-
-	// build class lookup: id → name
-	var classRows []classes.Class
-	if err := config.DB.Where("is_active = ?", true).Find(&classRows).Error; err != nil {
-		return nil, err
-	}
-	classLookup := make(map[uint]string, len(classRows))
-	for _, c := range classRows {
-		classLookup[c.ID] = c.Name
-	}
-
-	// build subject lookup: id → name
-	var subjectRows []subjects.Subject
-	if err := config.DB.Find(&subjectRows).Error; err != nil {
-		return nil, err
-	}
-	subjectLookup := make(map[uint]string, len(subjectRows))
-	for _, s := range subjectRows {
-		subjectLookup[s.ID] = s.Name
-	}
-
-	// per-class summary accumulator
-	classSummary := make(map[uint]*ClassBlockSummary)
-
-	items := make([]MatrixBlockDiagnosticItem, 0, len(ctx.blocks))
-	totalJP := 0
-	for _, b := range ctx.blocks {
-		item := MatrixBlockDiagnosticItem{
-			ID:          b.ID,
-			ClassID:     b.ClassID,
-			ClassName:   classLookup[b.ClassID],
-			TeacherID:   b.TeacherID,
-			SubjectID:   b.SubjectID,
-			SubjectName: subjectLookup[b.SubjectID],
-			Duration:    b.Duration,
-		}
-		if b.TeacherID != nil {
-			if info, ok := teacherLookup[*b.TeacherID]; ok {
-				item.TeacherNumber = &info.number
-				item.TeacherName = info.name
-			}
-		}
-		items = append(items, item)
-
-		totalJP += b.Duration
-		if _, ok := classSummary[b.ClassID]; !ok {
-			classSummary[b.ClassID] = &ClassBlockSummary{
-				ClassID:   b.ClassID,
-				ClassName: classLookup[b.ClassID],
-			}
-		}
-		classSummary[b.ClassID].BlockCount++
-		classSummary[b.ClassID].TotalJP += b.Duration
-	}
-
-	byClass := make([]ClassBlockSummary, 0, len(classSummary))
-	for _, s := range classSummary {
-		byClass = append(byClass, *s)
-	}
-	sort.Slice(byClass, func(i, j int) bool {
-		return byClass[i].ClassName < byClass[j].ClassName
-	})
-
-	return &MatrixBlocksDiagnostic{
-		TotalBlocks: len(ctx.blocks),
-		TotalJP:     totalJP,
-		ByClass:     byClass,
-		Blocks:      items,
-	}, nil
-}
-
-func splitToSingleJP(day string, slotIndex int, jp int) []timeRange {
-	out := make([]timeRange, 0, jp)
-	for i := 0; i < jp; i++ {
-		slots := algorithm.GenerateSlots()
-		start, end := matrixSlotTimeRange(day, slotIndex+i, slots)
-		if start == "" {
-			continue
-		}
-		out = append(out, timeRange{start: start, end: end})
-	}
-	return out
-}
+// ── Utilities ─────────────────────────────────────────────────────────────────
 
 func parseClock(s string) time.Time {
 	t, _ := time.Parse("15:04", s)
@@ -970,65 +431,6 @@ func dayOrder(day string) int {
 	}
 }
 
-func compareScheduleEntries(generated []ScheduleEntry, real []ScheduleEntry) ScheduleDiffResult {
-	generatedCounts, _ := countScheduleEntries(generated)
-	realCounts, _ := countScheduleEntries(real)
-
-	isSame := true
-	for key, realCount := range realCounts {
-		if generatedCounts[key] != realCount {
-			isSame = false
-			break
-		}
-	}
-	if isSame {
-		for key, generatedCount := range generatedCounts {
-			if realCounts[key] != generatedCount {
-				isSame = false
-				break
-			}
-		}
-	}
-
-	return ScheduleDiffResult{
-		Checked:           true,
-		IsSame:            isSame,
-		GeneratedCount:    len(generated),
-		RealScheduleCount: len(real),
-	}
-}
-
-func countScheduleEntries(entries []ScheduleEntry) (map[string]int, map[string]ScheduleEntry) {
-	counts := make(map[string]int, len(entries))
-	samples := make(map[string]ScheduleEntry, len(entries))
-
-	for _, entry := range entries {
-		key := scheduleEntryKey(entry)
-		counts[key]++
-		if _, exists := samples[key]; !exists {
-			samples[key] = entry
-		}
-	}
-
-	return counts, samples
-}
-
-func scheduleEntryKey(entry ScheduleEntry) string {
-	teacherID := ""
-	if entry.TeacherID != nil {
-		teacherID = strconv.FormatUint(uint64(*entry.TeacherID), 10)
-	}
-
-	parts := []string{
-		teacherID,
-		strconv.FormatUint(uint64(entry.SubjectID), 10),
-		strconv.FormatUint(uint64(entry.ClassID), 10),
-		entry.Day,
-		entry.TimeStart,
-		entry.TimeEnd,
-	}
-	return strings.Join(parts, "|")
-}
 
 // GenerateV3MultiRun runs the hybrid GA+SA sequentially for the given number of runs
 func GenerateV3MultiRun(runs int, opts GenerateHybridOptions) (*MultiRunResult, error) {
@@ -1055,11 +457,11 @@ func GenerateV3MultiRun(runs int, opts GenerateHybridOptions) (*MultiRunResult, 
 		if err != nil {
 			return nil, err
 		}
-		result.Generation.Meta.TotalElapsedMs = time.Since(runStart).Milliseconds()
+		result.Meta.TotalElapsedMs = time.Since(runStart).Milliseconds()
 
 		results = append(results, RunSummary{
 			Run:  i + 1,
-			Meta: result.Generation.Meta,
+			Meta: result.Meta,
 		})
 	}
 
