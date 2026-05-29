@@ -3,18 +3,17 @@ package teachingassignments
 import (
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type TeachingAssignment struct {
-	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	ID uint `gorm:"primaryKey;autoIncrement"`
 
 	// TeacherID is nullable — SBP entries have no assigned teacher
-	TeacherID *uuid.UUID `gorm:"type:uuid;index"`
+	TeacherID *uint `gorm:"index"`
 
-	SubjectID uuid.UUID `gorm:"type:uuid;not null;index"`
-	ClassID   uuid.UUID `gorm:"type:uuid;not null;index"`
+	SubjectID uint `gorm:"not null;index"`
+	ClassID   uint `gorm:"not null;index"`
 
 	JP int `gorm:"not null"` // jam pelajaran per week
 
@@ -23,7 +22,7 @@ type TeachingAssignment struct {
 	GroupKey *string `gorm:"index"`
 
 	CreatedAt time.Time
-	CreatedBy string `gorm:"default:'SYSTEM'"`
+	CreatedBy string         `gorm:"default:'SYSTEM'"`
 	UpdatedAt time.Time
 	UpdatedBy string         `gorm:"default:'SYSTEM'"`
 	DeletedAt gorm.DeletedAt `gorm:"index"`

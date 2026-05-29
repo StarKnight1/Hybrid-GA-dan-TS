@@ -14,7 +14,6 @@ import (
 	teachingassignments "smp_mater_dei_be/internal/teaching_assignments"
 	"smp_mater_dei_be/internal/users"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -60,11 +59,9 @@ func seedDefaultUsers(db *gorm.DB) error {
 		return fmt.Errorf("seed admin user: %w", err)
 	}
 
-	studentUserID := security.GenerateUUID()
 	studentUser := users.User{}
 	err = db.Where(&users.User{LoginIdentifier: "123456789"}).
 		Attrs(users.User{
-			ID:              studentUserID,
 			PasswordHash:    security.HashPassword("password"),
 			Role:            "student",
 			LoginIdentifier: "123456789",
@@ -139,7 +136,6 @@ func seedTeachers(db *gorm.DB) error {
 	teachersToSeed := make([]teachers.Teacher, 0, len(data))
 	for _, d := range data {
 		teachersToSeed = append(teachersToSeed, teachers.Teacher{
-			UserID:        uuid.New(),
 			TeacherNumber: d.Number,
 			FullName:      d.Name,
 			Gender:        d.Gender,
@@ -238,9 +234,9 @@ func seedSubjects(db *gorm.DB) error {
 }
 
 func SeedTeachingAssignments(db *gorm.DB) error {
-	teacherMap := make(map[string]uuid.UUID)
-	subjectMap := make(map[string]uuid.UUID)
-	classMap := make(map[string]uuid.UUID)
+	teacherMap := make(map[string]uint)
+	subjectMap := make(map[string]uint)
+	classMap := make(map[string]uint)
 
 	var allTeachers []teachers.Teacher
 	var allSubjects []subjects.Subject
@@ -546,7 +542,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 			return fmt.Errorf("class not found for assignment: %s", a.ClassName)
 		}
 
-		var teacherID *uuid.UUID
+		var teacherID *uint
 		if a.TeacherNumber != "" {
 			id, ok := teacherMap[a.TeacherNumber]
 			if !ok {
@@ -591,10 +587,10 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 	return nil
 }
 
-func buildAssignmentKey(teacherID *uuid.UUID, subjectID uuid.UUID, classID uuid.UUID, groupKey *string) string {
+func buildAssignmentKey(teacherID *uint, subjectID uint, classID uint, groupKey *string) string {
 	teacherPart := "nil"
 	if teacherID != nil {
-		teacherPart = teacherID.String()
+		teacherPart = strconv.FormatUint(uint64(*teacherID), 10)
 	}
 
 	groupPart := ""
@@ -602,7 +598,7 @@ func buildAssignmentKey(teacherID *uuid.UUID, subjectID uuid.UUID, classID uuid.
 		groupPart = *groupKey
 	}
 
-	return teacherPart + "|" + subjectID.String() + "|" + classID.String() + "|" + groupPart
+	return teacherPart + "|" + strconv.FormatUint(uint64(subjectID), 10) + "|" + strconv.FormatUint(uint64(classID), 10) + "|" + groupPart
 }
 
 func normalizeSubjectName(name string) string {

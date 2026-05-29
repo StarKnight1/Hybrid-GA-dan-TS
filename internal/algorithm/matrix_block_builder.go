@@ -4,25 +4,25 @@ import (
 	"fmt"
 
 	teachingassignments "smp_mater_dei_be/internal/teaching_assignments"
-
-	"github.com/google/uuid"
 )
 
-func GenerateMatrixBlocks(assignments []teachingassignments.TeachingAssignment, pjokSubjectID uuid.UUID) ([]MatrixBlock, error) {
+func GenerateMatrixBlocks(assignments []teachingassignments.TeachingAssignment, pjokSubjectID uint) ([]MatrixBlock, error) {
 	// Grouped blocks (SBP) are placed first so DecodeChromosome gives them
 	// priority before other subjects claim their class grid slots.
 	grouped := make([]MatrixBlock, 0, len(assignments))
 	ungrouped := make([]MatrixBlock, 0, len(assignments)*2)
 
+	var blockID uint = 0
 	for _, assignment := range assignments {
 		durations, err := SplitAssignmentJP(assignment.JP, assignment.SubjectID == pjokSubjectID)
 		if err != nil {
-			return nil, fmt.Errorf("split assignment %s: %w", assignment.ID, err)
+			return nil, fmt.Errorf("split assignment %d: %w", assignment.ID, err)
 		}
 
-		for partIndex, duration := range durations {
+		for _, duration := range durations {
+			blockID++
 			b := MatrixBlock{
-				ID:        matrixBlockIDForAssignment(assignment, partIndex, duration),
+				ID:        blockID,
 				TeacherID: assignment.TeacherID,
 				SubjectID: assignment.SubjectID,
 				ClassID:   assignment.ClassID,
@@ -81,23 +81,4 @@ func BuildGroupIndex(blocks []MatrixBlock) GroupIndex {
 		idx[*b.GroupKey] = append(idx[*b.GroupKey], i)
 	}
 	return idx
-}
-
-func matrixBlockIDForAssignment(assignment teachingassignments.TeachingAssignment, partIndex int, duration int) uuid.UUID {
-	teacherID := "nil"
-	if assignment.TeacherID != nil {
-		teacherID = assignment.TeacherID.String()
-	}
-
-	name := fmt.Sprintf(
-		"matrix-block|%s|%s|%s|%s|%d|%d|%d",
-		assignment.ID,
-		teacherID,
-		assignment.SubjectID,
-		assignment.ClassID,
-		assignment.JP,
-		partIndex,
-		duration,
-	)
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name))
 }

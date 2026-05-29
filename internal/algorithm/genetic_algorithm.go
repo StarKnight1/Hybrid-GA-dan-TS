@@ -5,8 +5,6 @@ import (
 	"math/rand"
 	"sort"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type GAConfig struct {
@@ -19,7 +17,7 @@ type GAConfig struct {
 	ProgressEvery   int
 	StagnationLimit int // stop early if best hasn't improved for this many generations; 0 = disabled
 	OnProgress      func(GAProgress)
-	PJOKSubjectID   uuid.UUID
+	PJOKSubjectID   uint
 }
 
 type GAProgress struct {
@@ -70,7 +68,7 @@ func betterThan(a, b individual) bool {
 // A result with Unplaced == 0 is a fully valid schedule.
 func RunGA(
 	blocks []MatrixBlock,
-	candidateIndex map[uuid.UUID][]Gene,
+	candidateIndex map[uint][]Gene,
 	daySlots DaySlots,
 	cfg GAConfig,
 ) GAResult {
@@ -116,7 +114,7 @@ func RunGA(
 		for len(next) < cfg.PopulationSize {
 			parentA := tournamentSelect(pop, cfg.TournamentSize, rng)
 			parentB := tournamentSelect(pop, cfg.TournamentSize, rng)
-			child := UniformCrossover(parentA.chromosome, parentB.chromosome, blocks, groups, rng)
+			child := ConstraintAwareCrossover(parentA.chromosome, parentB.chromosome, blocks, candidateIndex, groups, daySlots, cfg.PJOKSubjectID, rng)
 			applyMutation(&child, blocks, candidateIndex, groups, cfg.MutationRate, rng)
 			matrix, unplaced := DecodeChromosome(child, blocks, daySlots, cfg.PJOKSubjectID)
 			if unplaced > 0 {
@@ -187,10 +185,10 @@ func RunGA(
 
 func initPopulation(
 	blocks []MatrixBlock,
-	candidateIndex map[uuid.UUID][]Gene,
+	candidateIndex map[uint][]Gene,
 	daySlots DaySlots,
 	size int,
-	pjokSubjectID uuid.UUID,
+	pjokSubjectID uint,
 	groups GroupIndex,
 	rng *rand.Rand,
 ) []individual {
@@ -215,7 +213,7 @@ func tournamentSelect(pop []individual, k int, rng *rand.Rand) individual {
 	return best
 }
 
-func applyMutation(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uuid.UUID][]Gene, groups GroupIndex, rate float64, rng *rand.Rand) {
+func applyMutation(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, rate float64, rng *rand.Rand) {
 	processed := make(map[string]bool)
 	for i, block := range blocks {
 		if block.GroupKey != nil {
@@ -243,7 +241,7 @@ func applyMutation(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uuid.
 // mutateUnplaced force-reassigns every block that failed to place in the decoded
 // matrix. Unplaced blocks have nothing to lose, so giving them a fresh random
 // candidate is always worth trying. Group members are reassigned together.
-func mutateUnplaced(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uuid.UUID][]Gene, groups GroupIndex, matrix *ScheduleMatrix, rng *rand.Rand) {
+func mutateUnplaced(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, matrix *ScheduleMatrix, rng *rand.Rand) {
 	processed := make(map[string]bool)
 	for i, block := range blocks {
 		if block.GroupKey != nil {

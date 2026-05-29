@@ -3,17 +3,15 @@ package algorithm
 import (
 	"fmt"
 	"sort"
-
-	"github.com/google/uuid"
 )
 
 const realScheduleSBPTeacherNumber = "SBP"
 
 type RealScheduleMatrixOptions struct {
-	TeacherNumberToID      map[string]uuid.UUID
-	ClassNameToID          map[string]uuid.UUID
-	SubjectByTeacherNumber map[string]uuid.UUID
-	SBPSubjectID           uuid.UUID
+	TeacherNumberToID      map[string]uint
+	ClassNameToID          map[string]uint
+	SubjectByTeacherNumber map[string]uint
+	SBPSubjectID           uint
 	DaySlots               DaySlots
 }
 
@@ -80,6 +78,7 @@ func BuildScheduleMatrixFromRealEntries(entries []RealScheduleEntry, opts RealSc
 		startSlot int
 	}
 
+	var blockID uint = 0
 	planned := make([]pendingPlacement, 0, len(entries))
 	for _, key := range keys {
 		rows := grouped[key]
@@ -109,7 +108,8 @@ func BuildScheduleMatrixFromRealEntries(entries []RealScheduleEntry, opts RealSc
 				lastSlot = next.slotIndex
 			}
 
-			block, err := realScheduleBlockFromGroup(key.teacherNumber, key.className, start.entry.Day, start.slotIndex, duration, opts, daySlots)
+			blockID++
+			block, err := realScheduleBlockFromGroup(blockID, key.teacherNumber, key.className, start.entry.Day, start.slotIndex, duration, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -132,7 +132,7 @@ func BuildScheduleMatrixFromRealEntries(entries []RealScheduleEntry, opts RealSc
 	placements := make([]BlockPlacement, 0, len(planned))
 	for _, plannedPlacement := range planned {
 		if err := matrix.PlaceBlock(plannedPlacement.block.ID, plannedPlacement.day, plannedPlacement.startSlot); err != nil {
-			return nil, fmt.Errorf("place real schedule block %s: %w", plannedPlacement.block.ID, err)
+			return nil, fmt.Errorf("place real schedule block %d: %w", plannedPlacement.block.ID, err)
 		}
 		placement, ok := matrix.Placement(plannedPlacement.block.ID)
 		if ok {
@@ -151,20 +151,20 @@ func BuildScheduleMatrixFromRealEntries(entries []RealScheduleEntry, opts RealSc
 }
 
 func realScheduleBlockFromGroup(
+	id uint,
 	teacherNumber string,
 	className string,
 	day string,
 	startSlot int,
 	duration int,
 	opts RealScheduleMatrixOptions,
-	daySlots DaySlots,
 ) (MatrixBlock, error) {
 	classID := opts.ClassNameToID[className]
 
-	var teacherID *uuid.UUID
+	var teacherID *uint
 	if teacherNumber != realScheduleSBPTeacherNumber {
-		id := opts.TeacherNumberToID[teacherNumber]
-		teacherID = &id
+		tid := opts.TeacherNumberToID[teacherNumber]
+		teacherID = &tid
 	}
 
 	subjectID, err := realScheduleSubjectID(teacherNumber, opts)
@@ -173,7 +173,7 @@ func realScheduleBlockFromGroup(
 	}
 
 	block := MatrixBlock{
-		ID:        realScheduleBlockID(teacherNumber, className, day, startSlot, duration),
+		ID:        id,
 		TeacherID: teacherID,
 		SubjectID: subjectID,
 		ClassID:   classID,
@@ -183,19 +183,14 @@ func realScheduleBlockFromGroup(
 	return block, nil
 }
 
-func realScheduleSubjectID(teacherNumber string, opts RealScheduleMatrixOptions) (uuid.UUID, error) {
-	if teacherNumber == realScheduleSBPTeacherNumber && opts.SBPSubjectID != uuid.Nil {
+func realScheduleSubjectID(teacherNumber string, opts RealScheduleMatrixOptions) (uint, error) {
+	if teacherNumber == realScheduleSBPTeacherNumber && opts.SBPSubjectID != 0 {
 		return opts.SBPSubjectID, nil
 	}
 
 	subjectID, ok := opts.SubjectByTeacherNumber[teacherNumber]
-	if !ok || subjectID == uuid.Nil {
-		return uuid.Nil, fmt.Errorf("real schedule teacher %q has no subject mapping", teacherNumber)
+	if !ok || subjectID == 0 {
+		return 0, fmt.Errorf("real schedule teacher %q has no subject mapping", teacherNumber)
 	}
 	return subjectID, nil
-}
-
-func realScheduleBlockID(teacherNumber, className, day string, startSlot, duration int) uuid.UUID {
-	name := fmt.Sprintf("real-schedule|%s|%s|%s|%d|%d", teacherNumber, className, day, startSlot, duration)
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name))
 }

@@ -6,7 +6,6 @@ import (
 	"smp_mater_dei_be/internal/users/dto"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 func LoginHandler(c *gin.Context) {
@@ -35,12 +34,6 @@ func GetProfileHandler(c *gin.Context) {
 	userID, ok := userIDAny.(string)
 	if !ok {
 		response.Fail(c, http.StatusUnauthorized, "invalid user ID", nil)
-		return
-	}
-
-	_, err := uuid.Parse(userID)
-	if err != nil {
-		response.Fail(c, http.StatusInternalServerError, "invalid user ID", err.Error())
 		return
 	}
 

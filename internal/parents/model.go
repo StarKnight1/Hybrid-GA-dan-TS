@@ -3,14 +3,13 @@ package parents
 import (
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type Parent struct {
-	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	ID uint `gorm:"primaryKey;autoIncrement"`
 
-	UserID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex"`
+	UserID uint `gorm:"not null;uniqueIndex"`
 
 	FullName string `gorm:"not null"`
 	Phone    string

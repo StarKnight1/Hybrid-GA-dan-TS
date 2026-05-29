@@ -2,28 +2,26 @@ package algorithm
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type HybridConfig struct {
 	GA                GAConfig
-	SA                SAConfig
-	Restarts          int            // additional full GA+SA runs; 0 = single run
+	TS                TSConfig
+	Restarts          int            // additional full GA+TS runs; 0 = single run
 	LoopUntilFeasible bool           // keep retrying until unplaced == 0; ignores Restarts limit
 	MaxLoops          int            // max attempts when LoopUntilFeasible=true; 0 = 1000
-	OnGAComplete      func(GAResult) // fires after GA finishes, before SA starts
+	OnGAComplete      func(GAResult) // fires after GA finishes, before TS starts
 }
 
 type HybridResult struct {
 	GAPhase        GAResult
-	SAPhase        SAResult
+	TSPhase        TSResult
 	Chromosome     Chromosome
 	Matrix         *ScheduleMatrix
 	Unplaced       int
 	SoftViolations int
 	Elapsed        time.Duration
-	Loops          int // total full GA+SA runs attempted
+	Loops          int // total full GA+TS runs attempted
 }
 
 func DefaultHybridConfig() HybridConfig {
@@ -31,19 +29,19 @@ func DefaultHybridConfig() HybridConfig {
 	gaCfg.StagnationLimit = 100
 	return HybridConfig{
 		GA: gaCfg,
-		SA: DefaultSAConfig(),
+		TS: DefaultTSConfig(),
 	}
 }
 
-// RunHybrid runs GA then SA sequentially, repeating for Restarts additional runs.
-// GA explores the search space globally; SA refines the best GA result using matrix-level
-// local search. The best result across all runs is returned. Each restart uses an offset
-// seed so runs are independent but reproducible.
+// RunHybrid runs GA then TS sequentially, repeating for Restarts additional runs.
+// GA explores the search space globally; TS refines the best GA result using matrix-level
+// local search with a tabu list to prevent cycling. The best result across all runs is
+// returned. Each restart uses an offset seed so runs are independent but reproducible.
 // If LoopUntilFeasible is true, it keeps retrying beyond Restarts until unplaced == 0,
 // up to MaxLoops total attempts (default 1000 when MaxLoops == 0).
 func RunHybrid(
 	blocks []MatrixBlock,
-	candidateIndex map[uuid.UUID][]Gene,
+	candidateIndex map[uint][]Gene,
 	daySlots DaySlots,
 	cfg HybridConfig,
 ) HybridResult {
@@ -55,12 +53,12 @@ func RunHybrid(
 	}
 	isFeasible := func(r HybridResult) bool { return r.Unplaced == 0 }
 
-	seedOffset := func(n int) (gaS, saS int64) {
-		return cfg.GA.Seed + int64(n)*1234567891, cfg.SA.Seed + int64(n)*9876543211
+	seedOffset := func(n int) (gaS, tsS int64) {
+		return cfg.GA.Seed + int64(n)*1234567891, cfg.TS.Seed + int64(n)*9876543211
 	}
 	runWithOffset := func(n int) HybridResult {
 		rc := cfg
-		rc.GA.Seed, rc.SA.Seed = seedOffset(n)
+		rc.GA.Seed, rc.TS.Seed = seedOffset(n)
 		return runHybridOnce(blocks, candidateIndex, daySlots, rc)
 	}
 
@@ -94,7 +92,7 @@ func RunHybrid(
 
 func runHybridOnce(
 	blocks []MatrixBlock,
-	candidateIndex map[uuid.UUID][]Gene,
+	candidateIndex map[uint][]Gene,
 	daySlots DaySlots,
 	cfg HybridConfig,
 ) HybridResult {
@@ -114,14 +112,14 @@ func runHybridOnce(
 		}
 	}
 
-	saResult := RunSA(gaResult, blocks, candidateIndex, daySlots, cfg.SA)
+	tsResult := RunTS(gaResult, blocks, candidateIndex, daySlots, cfg.TS)
 
 	return HybridResult{
 		GAPhase:        gaResult,
-		SAPhase:        saResult,
-		Chromosome:     saResult.Chromosome,
-		Matrix:         saResult.Matrix,
-		Unplaced:       saResult.Unplaced,
-		SoftViolations: saResult.SoftViolations,
+		TSPhase:        tsResult,
+		Chromosome:     tsResult.Chromosome,
+		Matrix:         tsResult.Matrix,
+		Unplaced:       tsResult.Unplaced,
+		SoftViolations: tsResult.SoftViolations,
 	}
 }

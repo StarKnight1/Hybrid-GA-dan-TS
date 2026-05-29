@@ -2,8 +2,6 @@ package algorithm
 
 import (
 	"fmt"
-
-	"github.com/google/uuid"
 )
 
 type CellState uint8
@@ -16,34 +14,34 @@ const (
 
 type MatrixCell struct {
 	State   CellState
-	BlockID uuid.UUID
+	BlockID uint
 }
 
 type BlockPlacement struct {
-	BlockID   uuid.UUID
-	ClassID   uuid.UUID
-	TeacherID *uuid.UUID
+	BlockID   uint
+	ClassID   uint
+	TeacherID *uint
 	Day       string
 	StartSlot int
 	Duration  int
 }
 
 type subjectDayKey struct {
-	classID   uuid.UUID
-	subjectID uuid.UUID
+	classID   uint
+	subjectID uint
 }
 
 type ScheduleMatrix struct {
 	daySlots map[string][]Slot
 
-	classGrid   map[uuid.UUID]map[string][]MatrixCell
-	teacherGrid map[uuid.UUID]map[string][]MatrixCell
+	classGrid   map[uint]map[string][]MatrixCell
+	teacherGrid map[uint]map[string][]MatrixCell
 
-	blocks      map[uuid.UUID]MatrixBlock
-	placements  map[uuid.UUID]BlockPlacement
+	blocks      map[uint]MatrixBlock
+	placements  map[uint]BlockPlacement
 	subjectDays              map[subjectDayKey]map[string]int // (class,subject) → day → count of placed blocks
 	enforceDayDiversity      bool
-	dayDiversityExclusions   map[uuid.UUID]bool // subjects exempt from the day-diversity hard constraint
+	dayDiversityExclusions   map[uint]bool // subjects exempt from the day-diversity hard constraint
 }
 
 // EnableDayDiversity turns on the same-subject-same-day hard constraint.
@@ -56,24 +54,24 @@ func (s *ScheduleMatrix) EnableDayDiversity() {
 // constraint. Use this for PJOK: its 2JP (practice) and 1JP (theory) blocks
 // share the same (class, subject) but may legally land on the same day, as the
 // manual schedule shows. Must be called after EnableDayDiversity.
-func (s *ScheduleMatrix) ExcludeSubjectFromDayDiversity(subjectID uuid.UUID) {
+func (s *ScheduleMatrix) ExcludeSubjectFromDayDiversity(subjectID uint) {
 	if s.dayDiversityExclusions == nil {
-		s.dayDiversityExclusions = make(map[uuid.UUID]bool)
+		s.dayDiversityExclusions = make(map[uint]bool)
 	}
 	s.dayDiversityExclusions[subjectID] = true
 }
 
-func NewScheduleMatrix(classes []uuid.UUID, teachers []uuid.UUID, blocks []MatrixBlock, daySlots DaySlots) *ScheduleMatrix {
+func NewScheduleMatrix(classes []uint, teachers []uint, blocks []MatrixBlock, daySlots DaySlots) *ScheduleMatrix {
 	if daySlots == nil {
 		daySlots = GenerateSlots()
 	}
 
 	s := &ScheduleMatrix{
 		daySlots:    copyDaySlots(daySlots),
-		classGrid:   make(map[uuid.UUID]map[string][]MatrixCell),
-		teacherGrid: make(map[uuid.UUID]map[string][]MatrixCell),
-		blocks:      make(map[uuid.UUID]MatrixBlock, len(blocks)),
-		placements:  make(map[uuid.UUID]BlockPlacement),
+		classGrid:   make(map[uint]map[string][]MatrixCell),
+		teacherGrid: make(map[uint]map[string][]MatrixCell),
+		blocks:      make(map[uint]MatrixBlock, len(blocks)),
+		placements:  make(map[uint]BlockPlacement),
 		subjectDays: make(map[subjectDayKey]map[string]int),
 	}
 
@@ -94,20 +92,20 @@ func NewScheduleMatrix(classes []uuid.UUID, teachers []uuid.UUID, blocks []Matri
 	return s
 }
 
-func (s *ScheduleMatrix) CanPlaceBlock(blockID uuid.UUID, day string, startSlot int) error {
+func (s *ScheduleMatrix) CanPlaceBlock(blockID uint, day string, startSlot int) error {
 	if _, placed := s.placements[blockID]; placed {
-		return fmt.Errorf("block %s is already placed", blockID)
+		return fmt.Errorf("block %d is already placed", blockID)
 	}
 
 	block, ok := s.blocks[blockID]
 	if !ok {
-		return fmt.Errorf("unknown block %s", blockID)
+		return fmt.Errorf("unknown block %d", blockID)
 	}
 
 	return s.canPlace(block, day, startSlot)
 }
 
-func (s *ScheduleMatrix) PlaceBlock(blockID uuid.UUID, day string, startSlot int) error {
+func (s *ScheduleMatrix) PlaceBlock(blockID uint, day string, startSlot int) error {
 	if err := s.CanPlaceBlock(blockID, day, startSlot); err != nil {
 		return err
 	}
@@ -125,10 +123,10 @@ func (s *ScheduleMatrix) PlaceBlock(blockID uuid.UUID, day string, startSlot int
 	return nil
 }
 
-func (s *ScheduleMatrix) RemoveBlock(blockID uuid.UUID) error {
+func (s *ScheduleMatrix) RemoveBlock(blockID uint) error {
 	placement, ok := s.placements[blockID]
 	if !ok {
-		return fmt.Errorf("block %s is not placed", blockID)
+		return fmt.Errorf("block %d is not placed", blockID)
 	}
 
 	s.clearPlacement(placement)
@@ -136,7 +134,7 @@ func (s *ScheduleMatrix) RemoveBlock(blockID uuid.UUID) error {
 	return nil
 }
 
-func (s *ScheduleMatrix) MoveBlock(blockID uuid.UUID, day string, startSlot int) error {
+func (s *ScheduleMatrix) MoveBlock(blockID uint, day string, startSlot int) error {
 	oldPlacement, wasPlaced := s.placements[blockID]
 	if wasPlaced {
 		s.clearPlacement(oldPlacement)
@@ -153,7 +151,7 @@ func (s *ScheduleMatrix) MoveBlock(blockID uuid.UUID, day string, startSlot int)
 	return nil
 }
 
-func (s *ScheduleMatrix) ClassCell(classID uuid.UUID, day string, slotIndex int) (MatrixCell, bool) {
+func (s *ScheduleMatrix) ClassCell(classID uint, day string, slotIndex int) (MatrixCell, bool) {
 	rows, ok := s.classGrid[classID]
 	if !ok {
 		return MatrixCell{}, false
@@ -161,7 +159,7 @@ func (s *ScheduleMatrix) ClassCell(classID uuid.UUID, day string, slotIndex int)
 	return cellFromRows(rows, day, slotIndex)
 }
 
-func (s *ScheduleMatrix) TeacherCell(teacherID uuid.UUID, day string, slotIndex int) (MatrixCell, bool) {
+func (s *ScheduleMatrix) TeacherCell(teacherID uint, day string, slotIndex int) (MatrixCell, bool) {
 	rows, ok := s.teacherGrid[teacherID]
 	if !ok {
 		return MatrixCell{}, false
@@ -169,7 +167,7 @@ func (s *ScheduleMatrix) TeacherCell(teacherID uuid.UUID, day string, slotIndex 
 	return cellFromRows(rows, day, slotIndex)
 }
 
-func (s *ScheduleMatrix) Placement(blockID uuid.UUID) (BlockPlacement, bool) {
+func (s *ScheduleMatrix) Placement(blockID uint) (BlockPlacement, bool) {
 	placement, ok := s.placements[blockID]
 	return placement, ok
 }
@@ -182,13 +180,13 @@ func (s *ScheduleMatrix) ValidateIntegrity() error {
 	for blockID, placement := range s.placements {
 		block, ok := s.blocks[blockID]
 		if !ok {
-			return fmt.Errorf("placement references unknown block %s", blockID)
+			return fmt.Errorf("placement references unknown block %d", blockID)
 		}
 		if block.ClassID != placement.ClassID {
-			return fmt.Errorf("placement class mismatch for block %s", blockID)
+			return fmt.Errorf("placement class mismatch for block %d", blockID)
 		}
 		if block.Duration != placement.Duration {
-			return fmt.Errorf("placement duration mismatch for block %s", blockID)
+			return fmt.Errorf("placement duration mismatch for block %d", blockID)
 		}
 		if err := s.validatePlacementCells(placement); err != nil {
 			return err
@@ -226,7 +224,7 @@ func (s *ScheduleMatrix) ValidateIntegrity() error {
 
 func (s *ScheduleMatrix) canPlace(block MatrixBlock, day string, startSlot int) error {
 	if block.Duration <= 0 {
-		return fmt.Errorf("block %s has invalid duration %d", block.ID, block.Duration)
+		return fmt.Errorf("block %d has invalid duration %d", block.ID, block.Duration)
 	}
 	if _, ok := s.daySlots[day]; !ok {
 		return fmt.Errorf("unknown day %q", day)
@@ -239,14 +237,14 @@ func (s *ScheduleMatrix) canPlace(block MatrixBlock, day string, startSlot int) 
 
 	classRow := s.classGrid[block.ClassID][day]
 	if startSlot < 0 || startSlot+block.Duration > len(classRow) {
-		return fmt.Errorf("block %s does not fit at %s slot %d", block.ID, day, startSlot)
+		return fmt.Errorf("block %d does not fit at %s slot %d", block.ID, day, startSlot)
 	}
 
 	for offset := 0; offset < block.Duration; offset++ {
 		slotIndex := startSlot + offset
 		classCell := classRow[slotIndex]
 		if classCell.State != CellEmpty {
-			return fmt.Errorf("class %s is not free at %s slot %d", block.ClassID, day, slotIndex)
+			return fmt.Errorf("class %d is not free at %s slot %d", block.ClassID, day, slotIndex)
 		}
 
 		if block.TeacherID == nil {
@@ -254,7 +252,7 @@ func (s *ScheduleMatrix) canPlace(block MatrixBlock, day string, startSlot int) 
 		}
 		teacherCell := s.teacherGrid[*block.TeacherID][day][slotIndex]
 		if teacherCell.State != CellEmpty {
-			return fmt.Errorf("teacher %s is not free at %s slot %d", *block.TeacherID, day, slotIndex)
+			return fmt.Errorf("teacher %d is not free at %s slot %d", *block.TeacherID, day, slotIndex)
 		}
 	}
 
@@ -263,7 +261,7 @@ func (s *ScheduleMatrix) canPlace(block MatrixBlock, day string, startSlot int) 
 	if s.enforceDayDiversity && !s.dayDiversityExclusions[block.SubjectID] {
 		sdKey := subjectDayKey{block.ClassID, block.SubjectID}
 		if s.subjectDays[sdKey][day] > 0 {
-			return fmt.Errorf("class %s already has subject %s on %s", block.ClassID, block.SubjectID, day)
+			return fmt.Errorf("class %d already has subject %d on %s", block.ClassID, block.SubjectID, day)
 		}
 	}
 
@@ -314,14 +312,14 @@ func (s *ScheduleMatrix) clearPlacement(placement BlockPlacement) {
 	}
 }
 
-func (s *ScheduleMatrix) ensureClassGrid(classID uuid.UUID) {
+func (s *ScheduleMatrix) ensureClassGrid(classID uint) {
 	if _, ok := s.classGrid[classID]; ok {
 		return
 	}
 	s.classGrid[classID] = s.newGridRows()
 }
 
-func (s *ScheduleMatrix) ensureTeacherGrid(teacherID uuid.UUID) {
+func (s *ScheduleMatrix) ensureTeacherGrid(teacherID uint) {
 	if _, ok := s.teacherGrid[teacherID]; ok {
 		return
 	}
@@ -340,12 +338,12 @@ func (s *ScheduleMatrix) validatePlacementCells(placement BlockPlacement) error 
 	for offset := 0; offset < placement.Duration; offset++ {
 		slotIndex := placement.StartSlot + offset
 		if s.isBlockedSlot(placement.Day, slotIndex) {
-			return fmt.Errorf("block %s is placed on blocked slot %s %d", placement.BlockID, placement.Day, slotIndex)
+			return fmt.Errorf("block %d is placed on blocked slot %s %d", placement.BlockID, placement.Day, slotIndex)
 		}
 
 		classCell, ok := s.ClassCell(placement.ClassID, placement.Day, slotIndex)
 		if !ok || classCell.State != CellOccupied || classCell.BlockID != placement.BlockID {
-			return fmt.Errorf("class grid missing block %s at %s slot %d", placement.BlockID, placement.Day, slotIndex)
+			return fmt.Errorf("class grid missing block %d at %s slot %d", placement.BlockID, placement.Day, slotIndex)
 		}
 
 		if placement.TeacherID == nil {
@@ -353,36 +351,36 @@ func (s *ScheduleMatrix) validatePlacementCells(placement BlockPlacement) error 
 		}
 		teacherCell, ok := s.TeacherCell(*placement.TeacherID, placement.Day, slotIndex)
 		if !ok || teacherCell.State != CellOccupied || teacherCell.BlockID != placement.BlockID {
-			return fmt.Errorf("teacher grid missing block %s at %s slot %d", placement.BlockID, placement.Day, slotIndex)
+			return fmt.Errorf("teacher grid missing block %d at %s slot %d", placement.BlockID, placement.Day, slotIndex)
 		}
 	}
 	return nil
 }
 
-func (s *ScheduleMatrix) validateOccupiedClassCell(classID uuid.UUID, day string, slotIndex int, cell MatrixCell) error {
+func (s *ScheduleMatrix) validateOccupiedClassCell(classID uint, day string, slotIndex int, cell MatrixCell) error {
 	placement, ok := s.placements[cell.BlockID]
 	if !ok {
-		return fmt.Errorf("class grid has untracked block %s at %s slot %d", cell.BlockID, day, slotIndex)
+		return fmt.Errorf("class grid has untracked block %d at %s slot %d", cell.BlockID, day, slotIndex)
 	}
 	if placement.ClassID != classID || placement.Day != day {
-		return fmt.Errorf("class grid block %s disagrees with placement metadata", cell.BlockID)
+		return fmt.Errorf("class grid block %d disagrees with placement metadata", cell.BlockID)
 	}
 	if slotIndex < placement.StartSlot || slotIndex >= placement.StartSlot+placement.Duration {
-		return fmt.Errorf("class grid block %s is outside its placement window", cell.BlockID)
+		return fmt.Errorf("class grid block %d is outside its placement window", cell.BlockID)
 	}
 	return nil
 }
 
-func (s *ScheduleMatrix) validateOccupiedTeacherCell(teacherID uuid.UUID, day string, slotIndex int, cell MatrixCell) error {
+func (s *ScheduleMatrix) validateOccupiedTeacherCell(teacherID uint, day string, slotIndex int, cell MatrixCell) error {
 	placement, ok := s.placements[cell.BlockID]
 	if !ok {
-		return fmt.Errorf("teacher grid has untracked block %s at %s slot %d", cell.BlockID, day, slotIndex)
+		return fmt.Errorf("teacher grid has untracked block %d at %s slot %d", cell.BlockID, day, slotIndex)
 	}
 	if placement.TeacherID == nil || *placement.TeacherID != teacherID || placement.Day != day {
-		return fmt.Errorf("teacher grid block %s disagrees with placement metadata", cell.BlockID)
+		return fmt.Errorf("teacher grid block %d disagrees with placement metadata", cell.BlockID)
 	}
 	if slotIndex < placement.StartSlot || slotIndex >= placement.StartSlot+placement.Duration {
-		return fmt.Errorf("teacher grid block %s is outside its placement window", cell.BlockID)
+		return fmt.Errorf("teacher grid block %d is outside its placement window", cell.BlockID)
 	}
 	return nil
 }

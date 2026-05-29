@@ -3,14 +3,13 @@ package parents_students
 import (
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type ParentStudent struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	ParentID  uuid.UUID
-	StudentID uuid.UUID
+	ID        uint `gorm:"primaryKey;autoIncrement"`
+	ParentID  uint
+	StudentID uint
 	Relation  string // father, mother, guardian
 
 	CreatedAt time.Time

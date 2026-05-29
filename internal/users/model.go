@@ -3,12 +3,11 @@ package users
 import (
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type User struct {
-	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	ID uint `gorm:"primaryKey;autoIncrement"`
 
 	LoginIdentifier string `gorm:"uniqueIndex;not null"`
 	PasswordHash    string `gorm:"not null"`

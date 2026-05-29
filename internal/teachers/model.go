@@ -3,14 +3,13 @@ package teachers
 import (
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type Teacher struct {
-	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	ID uint `gorm:"primaryKey;autoIncrement"`
 
-	UserID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex"`
+	UserID *uint `gorm:"uniqueIndex"`
 
 	TeacherNumber int `gorm:"uniqueIndex;not null"`
 

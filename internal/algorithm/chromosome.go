@@ -3,8 +3,6 @@ package algorithm
 import (
 	"math/rand"
 	"sort"
-
-	"github.com/google/uuid"
 )
 
 // Gene is the scheduled placement for one MatrixBlock.
@@ -44,7 +42,7 @@ const pjokDeadlineEndTime = "10:50"
 // for every block. A position is valid when every slot in the window is non-blocked.
 // PJOK 2JP blocks are hard-restricted to morning slots (ending ≤ 10:50).
 // Feasibility confirmed: 18 valid morning slots per teacher, 8 classes per teacher.
-func BuildCandidateIndex(blocks []MatrixBlock, pjokSubjectID uuid.UUID, daySlots DaySlots) map[uuid.UUID][]Gene {
+func BuildCandidateIndex(blocks []MatrixBlock, pjokSubjectID uint, daySlots DaySlots) map[uint][]Gene {
 	if daySlots == nil {
 		daySlots = GenerateSlots()
 	}
@@ -56,9 +54,9 @@ func BuildCandidateIndex(blocks []MatrixBlock, pjokSubjectID uuid.UUID, daySlots
 
 	pjok2JPCandidates := pjokMorningOnly(baseByDuration[2], daySlots)
 
-	index := make(map[uuid.UUID][]Gene, len(blocks))
+	index := make(map[uint][]Gene, len(blocks))
 	for _, block := range blocks {
-		if pjokSubjectID != uuid.Nil && block.SubjectID == pjokSubjectID && block.Duration == 2 {
+		if pjokSubjectID != 0 && block.SubjectID == pjokSubjectID && block.Duration == 2 {
 			index[block.ID] = pjok2JPCandidates
 		} else {
 			index[block.ID] = baseByDuration[block.Duration]
@@ -122,7 +120,7 @@ func validCandidatesForDuration(duration int, daySlots DaySlots) []Gene {
 // RandomChromosome creates a chromosome with each block assigned a random valid
 // (Day, StartSlot) from candidateIndex. Blocks sharing a GroupKey are assigned
 // the same gene so parallel classes are always scheduled together.
-func RandomChromosome(blocks []MatrixBlock, candidateIndex map[uuid.UUID][]Gene, groups GroupIndex, rng *rand.Rand) Chromosome {
+func RandomChromosome(blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, rng *rand.Rand) Chromosome {
 	c := NewChromosome(len(blocks))
 	assigned := make(map[int]bool)
 	for i, block := range blocks {
@@ -150,7 +148,7 @@ func RandomChromosome(blocks []MatrixBlock, candidateIndex map[uuid.UUID][]Gene,
 // then all other blocks sorted by fewest candidates first.
 // For each block, it picks a random candidate that is valid in the current matrix,
 // so the result typically decodes to 0 unplaced blocks.
-func SmartChromosome(blocks []MatrixBlock, candidateIndex map[uuid.UUID][]Gene, groups GroupIndex, daySlots DaySlots, pjokSubjectID uuid.UUID, rng *rand.Rand) Chromosome {
+func SmartChromosome(blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, daySlots DaySlots, pjokSubjectID uint, rng *rand.Rand) Chromosome {
 	type item struct {
 		origIdx  int
 		block    MatrixBlock
@@ -159,7 +157,7 @@ func SmartChromosome(blocks []MatrixBlock, candidateIndex map[uuid.UUID][]Gene, 
 	items := make([]item, len(blocks))
 	for i, b := range blocks {
 		p := len(candidateIndex[b.ID])
-		if pjokSubjectID != uuid.Nil && b.SubjectID == pjokSubjectID && b.Duration == 2 {
+		if pjokSubjectID != 0 && b.SubjectID == pjokSubjectID && b.Duration == 2 {
 			p = -1 // PJOK 2JP always first
 		}
 		items[i] = item{i, b, p}
@@ -170,7 +168,7 @@ func SmartChromosome(blocks []MatrixBlock, candidateIndex map[uuid.UUID][]Gene, 
 
 	matrix := NewScheduleMatrix(nil, nil, blocks, daySlots)
 	matrix.EnableDayDiversity()
-	if pjokSubjectID != uuid.Nil {
+	if pjokSubjectID != 0 {
 		matrix.ExcludeSubjectFromDayDiversity(pjokSubjectID)
 	}
 
@@ -223,7 +221,7 @@ func SmartChromosome(blocks []MatrixBlock, candidateIndex map[uuid.UUID][]Gene, 
 
 // MutateGene replaces the gene at position i with a new random candidate for
 // that block. Callers are responsible for propagating the gene to group mates.
-func MutateGene(c *Chromosome, i int, block MatrixBlock, candidateIndex map[uuid.UUID][]Gene, rng *rand.Rand) {
+func MutateGene(c *Chromosome, i int, block MatrixBlock, candidateIndex map[uint][]Gene, rng *rand.Rand) {
 	candidates := candidateIndex[block.ID]
 	if len(candidates) == 0 {
 		return
@@ -231,32 +229,135 @@ func MutateGene(c *Chromosome, i int, block MatrixBlock, candidateIndex map[uuid
 	c.Set(i, candidates[rng.Intn(len(candidates))])
 }
 
-// UniformCrossover produces a child chromosome by independently picking each
-// gene from parent a or parent b. Blocks sharing a GroupKey always inherit
-// from the same parent so the group invariant is preserved.
-func UniformCrossover(a, b Chromosome, blocks []MatrixBlock, groups GroupIndex, rng *rand.Rand) Chromosome {
-	n := a.Len()
-	child := NewChromosome(n)
-	assigned := make(map[int]bool)
-	for i := 0; i < n; i++ {
-		if assigned[i] {
-			continue
+// ConstraintAwareCrossover produces a child chromosome by iterating blocks in
+// constraint-tightness order (PJOK 2JP first, then fewest candidates first) and
+// incrementally building the child against a live ScheduleMatrix.
+// For each block it prefers whichever parent's gene is conflict-free in the partial
+// schedule; when both are valid it picks randomly; when neither is valid it falls
+// back to a random conflict-free candidate from candidateIndex.
+// Blocks sharing a GroupKey are always inherited from the same parent.
+func ConstraintAwareCrossover(
+	a, b Chromosome,
+	blocks []MatrixBlock,
+	candidateIndex map[uint][]Gene,
+	groups GroupIndex,
+	daySlots DaySlots,
+	pjokSubjectID uint,
+	rng *rand.Rand,
+) Chromosome {
+	type item struct {
+		origIdx  int
+		block    MatrixBlock
+		priority int
+	}
+	items := make([]item, len(blocks))
+	for i, bl := range blocks {
+		p := len(candidateIndex[bl.ID])
+		if pjokSubjectID != 0 && bl.SubjectID == pjokSubjectID && bl.Duration == 2 {
+			p = -1
 		}
-		var gene Gene
-		if rng.Intn(2) == 0 {
-			gene = a.Get(i)
+		items[i] = item{i, bl, p}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].priority < items[j].priority
+	})
+
+	matrix := NewScheduleMatrix(nil, nil, blocks, daySlots)
+	matrix.EnableDayDiversity()
+	if pjokSubjectID != 0 {
+		matrix.ExcludeSubjectFromDayDiversity(pjokSubjectID)
+	}
+
+	child := NewChromosome(len(blocks))
+	processedGroups := make(map[string]bool)
+
+	for _, it := range items {
+		i, block := it.origIdx, it.block
+
+		if block.GroupKey != nil {
+			if processedGroups[*block.GroupKey] {
+				continue
+			}
+			processedGroups[*block.GroupKey] = true
+
+			geneA := a.Get(i)
+			geneB := b.Get(i)
+			canA := geneA.IsPlaced() && groupCanPlace(groups[*block.GroupKey], blocks, geneA, matrix)
+			canB := geneB.IsPlaced() && groupCanPlace(groups[*block.GroupKey], blocks, geneB, matrix)
+
+			var chosen Gene
+			switch {
+			case canA && canB:
+				if rng.Intn(2) == 0 {
+					chosen = geneA
+				} else {
+					chosen = geneB
+				}
+			case canA:
+				chosen = geneA
+			case canB:
+				chosen = geneB
+			default:
+				for _, pi := range rng.Perm(len(candidateIndex[block.ID])) {
+					g := candidateIndex[block.ID][pi]
+					if groupCanPlace(groups[*block.GroupKey], blocks, g, matrix) {
+						chosen = g
+						break
+					}
+				}
+			}
+
+			if chosen.IsPlaced() {
+				for _, j := range groups[*block.GroupKey] {
+					child.Set(j, chosen)
+					_ = matrix.PlaceBlock(blocks[j].ID, chosen.Day, chosen.StartSlot)
+				}
+			}
 		} else {
-			gene = b.Get(i)
-		}
-		child.Set(i, gene)
-		if i < len(blocks) && blocks[i].GroupKey != nil {
-			for _, j := range groups[*blocks[i].GroupKey] {
-				child.Set(j, gene)
-				assigned[j] = true
+			geneA := a.Get(i)
+			geneB := b.Get(i)
+			canA := geneA.IsPlaced() && matrix.CanPlaceBlock(block.ID, geneA.Day, geneA.StartSlot) == nil
+			canB := geneB.IsPlaced() && matrix.CanPlaceBlock(block.ID, geneB.Day, geneB.StartSlot) == nil
+
+			var chosen Gene
+			switch {
+			case canA && canB:
+				if rng.Intn(2) == 0 {
+					chosen = geneA
+				} else {
+					chosen = geneB
+				}
+			case canA:
+				chosen = geneA
+			case canB:
+				chosen = geneB
+			default:
+				for _, pi := range rng.Perm(len(candidateIndex[block.ID])) {
+					g := candidateIndex[block.ID][pi]
+					if matrix.CanPlaceBlock(block.ID, g.Day, g.StartSlot) == nil {
+						chosen = g
+						break
+					}
+				}
+			}
+
+			if chosen.IsPlaced() {
+				child.Set(i, chosen)
+				_ = matrix.PlaceBlock(block.ID, chosen.Day, chosen.StartSlot)
 			}
 		}
 	}
+
 	return child
+}
+
+func groupCanPlace(groupIndices []int, blocks []MatrixBlock, gene Gene, matrix *ScheduleMatrix) bool {
+	for _, j := range groupIndices {
+		if matrix.CanPlaceBlock(blocks[j].ID, gene.Day, gene.StartSlot) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // SoftViolationBreakdown holds per-category soft violation counts.
@@ -273,11 +374,11 @@ func (bd SoftViolationBreakdown) Total() int {
 
 // BreakdownSoftViolations returns a per-category breakdown of soft violations.
 // Use Total() for the weighted score used by the optimiser.
-func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokSubjectID uuid.UUID) SoftViolationBreakdown {
+func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokSubjectID uint) SoftViolationBreakdown {
 	var bd SoftViolationBreakdown
 
 	// pre-compute which block IDs belong to a parallel group (SBP)
-	groupedID := make(map[uuid.UUID]bool, len(blocks))
+	groupedID := make(map[uint]bool, len(blocks))
 	for _, b := range blocks {
 		if b.GroupKey != nil {
 			groupedID[b.ID] = true
@@ -285,10 +386,10 @@ func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokS
 	}
 
 	// ── same-day split-subject penalty ───────────────────────────────────────
-	type key struct{ classID, subjectID uuid.UUID }
-	groups := make(map[key][]uuid.UUID)
+	type key struct{ classID, subjectID uint }
+	groups := make(map[key][]uint)
 	for _, b := range blocks {
-		if pjokSubjectID != uuid.Nil && b.SubjectID == pjokSubjectID {
+		if pjokSubjectID != 0 && b.SubjectID == pjokSubjectID {
 			continue
 		}
 		k := key{b.ClassID, b.SubjectID}
@@ -298,7 +399,7 @@ func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokS
 		if len(ids) < 2 {
 			continue
 		}
-		dayBlocks := make(map[string][]uuid.UUID)
+		dayBlocks := make(map[string][]uint)
 		for _, id := range ids {
 			if p, ok := matrix.Placement(id); ok {
 				dayBlocks[p.Day] = append(dayBlocks[p.Day], id)
@@ -320,7 +421,7 @@ func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokS
 	}
 
 	// ── PJOK 2JP deadline penalty (weight 3) ─────────────────────────────────
-	if pjokSubjectID != uuid.Nil {
+	if pjokSubjectID != 0 {
 		daySlots := GenerateSlots()
 		slotEnd := make(map[string]map[int]string, len(daySlots))
 		for day, slots := range daySlots {
@@ -350,13 +451,13 @@ func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokS
 // CountSoftViolations returns the weighted soft violation total.
 // This is the hot-path version used by the optimiser inner loop — no extra allocations.
 // Use BreakdownSoftViolations when you need per-category counts (reporting only).
-func CountSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokSubjectID uuid.UUID) int {
+func CountSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokSubjectID uint) int {
 	violations := 0
 
-	type key struct{ classID, subjectID uuid.UUID }
-	groups := make(map[key][]uuid.UUID)
+	type key struct{ classID, subjectID uint }
+	groups := make(map[key][]uint)
 	for _, b := range blocks {
-		if pjokSubjectID != uuid.Nil && b.SubjectID == pjokSubjectID {
+		if pjokSubjectID != 0 && b.SubjectID == pjokSubjectID {
 			continue
 		}
 		k := key{b.ClassID, b.SubjectID}
@@ -385,10 +486,10 @@ func CountSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokSubje
 // DecodeChromosome builds a ScheduleMatrix from a chromosome by placing blocks
 // in order. Blocks whose gene is unplaced or that conflict with an already-placed
 // block are skipped; the returned count is the number of such unplaced blocks.
-func DecodeChromosome(c Chromosome, blocks []MatrixBlock, daySlots DaySlots, pjokSubjectID uuid.UUID) (*ScheduleMatrix, int) {
+func DecodeChromosome(c Chromosome, blocks []MatrixBlock, daySlots DaySlots, pjokSubjectID uint) (*ScheduleMatrix, int) {
 	matrix := NewScheduleMatrix(nil, nil, blocks, daySlots)
 	matrix.EnableDayDiversity()
-	if pjokSubjectID != uuid.Nil {
+	if pjokSubjectID != 0 {
 		matrix.ExcludeSubjectFromDayDiversity(pjokSubjectID)
 	}
 	unplaced := 0

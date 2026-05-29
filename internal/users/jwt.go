@@ -2,15 +2,15 @@ package users
 
 import (
 	"smp_mater_dei_be/internal/platform/config"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
-func GenerateToken(userID uuid.UUID) (string, error) {
+func GenerateToken(userID uint) (string, error) {
 	claims := jwt.MapClaims{
-		"sub": userID.String(),
+		"sub": strconv.FormatUint(uint64(userID), 10),
 		"exp": time.Now().Add(24 * time.Hour).Unix(),
 	}
 

@@ -1,16 +1,14 @@
 package schedule
 
-import "github.com/google/uuid"
-
 // ScheduleEntry is one generated 1-JP timetable row.
 // One JP is always 40 minutes.
 type ScheduleEntry struct {
-	TeacherID *uuid.UUID `json:"teacherId,omitempty"`
-	SubjectID uuid.UUID  `json:"subjectId"`
-	ClassID   uuid.UUID  `json:"classId"`
-	Day       string     `json:"day"`
-	TimeStart string     `json:"timeStart"`
-	TimeEnd   string     `json:"timeEnd"`
+	TeacherID *uint  `json:"teacherId,omitempty"`
+	SubjectID uint   `json:"subjectId"`
+	ClassID   uint   `json:"classId"`
+	Day       string `json:"day"`
+	TimeStart string `json:"timeStart"`
+	TimeEnd   string `json:"timeEnd"`
 }
 
 // GAParams contains tunable parameters for schedule generation.
@@ -86,8 +84,8 @@ type ScheduleMeta struct {
 	Input               InputStats  `json:"input"`
 	DefaultGA           GAParams    `json:"-"`
 	EffectiveGA         GAParams    `json:"ga"`
-	DefaultSA           *SAParams   `json:"-"`
-	EffectiveSA         *SAParams   `json:"sa,omitempty"`
+	DefaultTS           *TSParams   `json:"-"`
+	EffectiveTS         *TSParams   `json:"ts,omitempty"`
 	Result              ResultStats `json:"result"`
 	TotalElapsedMs      int64       `json:"totalElapsedMs,omitempty"`
 	LoopCount           int         `json:"loopCount,omitempty"`
@@ -170,24 +168,23 @@ type GAParameterSpec struct {
 	Description string `json:"description"`
 }
 
-// SAParams contains tunable parameters for the SA phase of the hybrid.
-type SAParams struct {
-	InitialTemperature float64 `json:"initialTemperature"`
-	CoolingRate        float64 `json:"coolingRate"`
-	Iterations         int     `json:"iterations"`
-	ProgressEvery      int     `json:"progressEvery"`
-	Seed               int64   `json:"seed"`
-	PerturbCount       int     `json:"perturbCount"`
-	PerturbAfter       int     `json:"perturbAfter"`
+// TSParams contains tunable parameters for the TS phase of the hybrid.
+type TSParams struct {
+	TabuTenure    int   `json:"tabuTenure"`
+	Iterations    int   `json:"iterations"`
+	ProgressEvery int   `json:"progressEvery"`
+	Seed          int64 `json:"seed"`
+	PerturbCount  int   `json:"perturbCount"`
+	PerturbAfter  int   `json:"perturbAfter"`
 }
 
-// SAProgressSnapshot is one observable progress point emitted during SA execution.
-type SAProgressSnapshot struct {
-	Phase                 string  `json:"phase"` // always "sa"
+// TSProgressSnapshot is one observable progress point emitted during TS execution.
+type TSProgressSnapshot struct {
+	Phase                 string  `json:"phase"` // always "ts"
 	Iteration             int     `json:"iteration"`
 	TotalIterations       int     `json:"totalIterations"`
 	ProgressPercent       float64 `json:"progressPercent"`
-	Temperature           float64 `json:"temperature"`
+	TabuListSize          int     `json:"tabuListSize"`
 	CurrentUnplaced       int     `json:"currentUnplaced"`
 	CurrentSoftViolations int     `json:"currentSoftViolations"`
 	BestUnplaced          int     `json:"bestUnplaced"`
@@ -234,15 +231,15 @@ type MultiRunResult struct {
 	Results        []RunSummary `json:"results"`
 }
 
-// GenerateHybridOptions carries options for the v3 hybrid GA+SA endpoint.
+// GenerateHybridOptions carries options for the v3 hybrid GA+TS endpoint.
 type GenerateHybridOptions struct {
-	GA              GAParams
-	SA              SAParams
+	GA                GAParams
+	TS                TSParams
 	StagnationLimit   int  // GA stops after this many generations without improvement; 0 = disabled
-	Restarts          int  // additional full GA+SA runs; 0 = single run
+	Restarts          int  // additional full GA+TS runs; 0 = single run
 	LoopUntilFeasible bool // keep retrying until unplaced == 0; ignores Restarts limit
 	MaxLoops          int  // max attempts when LoopUntilFeasible=true; 0 = 1000
-	OnGAProgress    func(GAProgressSnapshot)
-	OnGAComplete    func(GAPhaseResult) // fires when GA finishes, before SA starts
-	OnSAProgress    func(SAProgressSnapshot)
+	OnGAProgress      func(GAProgressSnapshot)
+	OnGAComplete      func(GAPhaseResult) // fires when GA finishes, before TS starts
+	OnTSProgress      func(TSProgressSnapshot)
 }

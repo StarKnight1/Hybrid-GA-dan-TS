@@ -41,18 +41,18 @@ func GenerateScheduleHandler(c *gin.Context) {
 	}
 
 	start := time.Now()
-	result, err := GenerateScheduleWithOptions(opts)
+	result, err := GenerateV2Schedule(opts)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "failed to generate schedule", err.Error())
 		return
 	}
-	result.Meta.TotalElapsedMs = time.Since(start).Milliseconds()
+	result.Generation.Meta.TotalElapsedMs = time.Since(start).Milliseconds()
 
 	if logToTerminal {
-		logScheduleGenerationSummary(result)
+		logScheduleGenerationSummary(result.Generation)
 	}
 
-	response.OK(c, result, "schedule generated successfully")
+	response.OK(c, result.Generation, "schedule generated successfully")
 }
 
 func GenerateScheduleAndCompareHandler(c *gin.Context) {
@@ -75,7 +75,7 @@ func GenerateScheduleAndCompareHandler(c *gin.Context) {
 	}
 
 	start := time.Now()
-	result, err := GenerateScheduleAndCompareWithReal(opts)
+	result, err := GenerateV2Schedule(opts)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "failed to generate and compare schedule", err.Error())
 		return
@@ -141,7 +141,7 @@ func GenerateScheduleStreamHandler(c *gin.Context) {
 		flusher.Flush()
 	}
 
-	result, genErr := GenerateScheduleWithOptions(opts)
+	result, genErr := GenerateV2Schedule(opts)
 	if genErr != nil {
 		if c.Request.Context().Err() == nil {
 			c.SSEvent("error", gin.H{"message": genErr.Error()})
@@ -152,9 +152,9 @@ func GenerateScheduleStreamHandler(c *gin.Context) {
 
 	if c.Request.Context().Err() == nil {
 		if logToTerminal {
-			logScheduleGenerationSummary(result)
+			logScheduleGenerationSummary(result.Generation)
 		}
-		c.SSEvent("completed", result)
+		c.SSEvent("completed", result.Generation)
 		flusher.Flush()
 	}
 }
@@ -203,7 +203,7 @@ func GenerateScheduleAndCompareStreamHandler(c *gin.Context) {
 		flusher.Flush()
 	}
 
-	result, genErr := GenerateScheduleAndCompareWithReal(opts)
+	result, genErr := GenerateV2Schedule(opts)
 	if genErr != nil {
 		if c.Request.Context().Err() == nil {
 			c.SSEvent("error", gin.H{"message": genErr.Error()})
@@ -341,13 +341,10 @@ func DiagnoseSAHandler(c *gin.Context) {
 		return
 	}
 
-	result, err := DiagnoseSA(trials, saIterations, seed)
-	if err != nil {
-		response.Fail(c, http.StatusInternalServerError, "SA diagnostic failed", err.Error())
-		return
-	}
-
-	response.OK(c, result, "SA diagnostic complete")
+	_ = trials
+	_ = saIterations
+	_ = seed
+	response.Fail(c, http.StatusGone, "SA diagnostic not available", "legacy SA diagnostic endpoint removed")
 }
 
 func parseGenerateScheduleOptions(c *gin.Context) (GenerateScheduleOptions, error) {
@@ -538,37 +535,32 @@ func GenerateV3ScheduleReadableHandler(c *gin.Context) {
 		return
 	}
 
-	saInitTemp, err := parseFloatQuery(c, "saInitialTemperature", DefaultSAParams().InitialTemperature)
+	tsTabuTenure, err := parseIntQuery(c, "tsTabuTenure", DefaultTSParams().TabuTenure)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saCoolingRate, err := parseFloatQuery(c, "saCoolingRate", DefaultSAParams().CoolingRate)
+	tsIterations, err := parseIntQuery(c, "tsIterations", DefaultTSParams().Iterations)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saIterations, err := parseIntQuery(c, "saIterations", DefaultSAParams().Iterations)
+	tsProgressEvery, err := parseIntQuery(c, "tsProgressEvery", DefaultTSParams().ProgressEvery)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saProgressEvery, err := parseIntQuery(c, "saProgressEvery", DefaultSAParams().ProgressEvery)
+	tsSeed, err := parseInt64Query(c, "tsSeed", 0)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saSeed, err := parseInt64Query(c, "saSeed", 0)
+	tsPerturbCount, err := parseIntQuery(c, "tsPerturbCount", DefaultTSParams().PerturbCount)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saPerturbCount, err := parseIntQuery(c, "saPerturbCount", DefaultSAParams().PerturbCount)
-	if err != nil {
-		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
-		return
-	}
-	saPerturbAfter, err := parseIntQuery(c, "saPerturbAfter", DefaultSAParams().PerturbAfter)
+	tsPerturbAfter, err := parseIntQuery(c, "tsPerturbAfter", DefaultTSParams().PerturbAfter)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
@@ -586,14 +578,13 @@ func GenerateV3ScheduleReadableHandler(c *gin.Context) {
 
 	opts := GenerateHybridOptions{
 		GA: gaOpts.Params,
-		SA: SAParams{
-			InitialTemperature: saInitTemp,
-			CoolingRate:        saCoolingRate,
-			Iterations:         saIterations,
-			ProgressEvery:      saProgressEvery,
-			Seed:               saSeed,
-			PerturbCount:       saPerturbCount,
-			PerturbAfter:       saPerturbAfter,
+		TS: TSParams{
+			TabuTenure:    tsTabuTenure,
+			Iterations:    tsIterations,
+			ProgressEvery: tsProgressEvery,
+			Seed:          tsSeed,
+			PerturbCount:  tsPerturbCount,
+			PerturbAfter:  tsPerturbAfter,
 		},
 		StagnationLimit: stagnationLimit,
 		Restarts:        restarts,
@@ -616,37 +607,32 @@ func GenerateV3MultiRunHandler(c *gin.Context) {
 		return
 	}
 
-	saInitTemp, err := parseFloatQuery(c, "saInitialTemperature", DefaultSAParams().InitialTemperature)
+	tsTabuTenure, err := parseIntQuery(c, "tsTabuTenure", DefaultTSParams().TabuTenure)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saCoolingRate, err := parseFloatQuery(c, "saCoolingRate", DefaultSAParams().CoolingRate)
+	tsIterations, err := parseIntQuery(c, "tsIterations", DefaultTSParams().Iterations)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saIterations, err := parseIntQuery(c, "saIterations", DefaultSAParams().Iterations)
+	tsProgressEvery, err := parseIntQuery(c, "tsProgressEvery", DefaultTSParams().ProgressEvery)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saProgressEvery, err := parseIntQuery(c, "saProgressEvery", DefaultSAParams().ProgressEvery)
+	tsSeed, err := parseInt64Query(c, "tsSeed", 0)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saSeed, err := parseInt64Query(c, "saSeed", 0)
+	tsPerturbCount, err := parseIntQuery(c, "tsPerturbCount", DefaultTSParams().PerturbCount)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saPerturbCount, err := parseIntQuery(c, "saPerturbCount", DefaultSAParams().PerturbCount)
-	if err != nil {
-		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
-		return
-	}
-	saPerturbAfter, err := parseIntQuery(c, "saPerturbAfter", DefaultSAParams().PerturbAfter)
+	tsPerturbAfter, err := parseIntQuery(c, "tsPerturbAfter", DefaultTSParams().PerturbAfter)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
@@ -669,20 +655,19 @@ func GenerateV3MultiRunHandler(c *gin.Context) {
 
 	opts := GenerateHybridOptions{
 		GA: gaOpts.Params,
-		SA: SAParams{
-			InitialTemperature: saInitTemp,
-			CoolingRate:        saCoolingRate,
-			Iterations:         saIterations,
-			ProgressEvery:      saProgressEvery,
-			Seed:               saSeed,
-			PerturbCount:       saPerturbCount,
-			PerturbAfter:       saPerturbAfter,
+		TS: TSParams{
+			TabuTenure:    tsTabuTenure,
+			Iterations:    tsIterations,
+			ProgressEvery: tsProgressEvery,
+			Seed:          tsSeed,
+			PerturbCount:  tsPerturbCount,
+			PerturbAfter:  tsPerturbAfter,
 		},
 		StagnationLimit: stagnationLimit,
 		Restarts:        restarts,
 	}
 
-	result, err := GenerateV3MultiRun(opts, runs)
+	result, err := GenerateV3MultiRun(runs, opts)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "failed to run multi-run schedule generation", err.Error())
 		return
@@ -698,37 +683,32 @@ func GenerateV3MultiRunStreamHandler(c *gin.Context) {
 		return
 	}
 
-	saInitTemp, err := parseFloatQuery(c, "saInitialTemperature", DefaultSAParams().InitialTemperature)
+	tsTabuTenure, err := parseIntQuery(c, "tsTabuTenure", DefaultTSParams().TabuTenure)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saCoolingRate, err := parseFloatQuery(c, "saCoolingRate", DefaultSAParams().CoolingRate)
+	tsIterations, err := parseIntQuery(c, "tsIterations", DefaultTSParams().Iterations)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saIterations, err := parseIntQuery(c, "saIterations", DefaultSAParams().Iterations)
+	tsProgressEvery, err := parseIntQuery(c, "tsProgressEvery", DefaultTSParams().ProgressEvery)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saProgressEvery, err := parseIntQuery(c, "saProgressEvery", DefaultSAParams().ProgressEvery)
+	tsSeed, err := parseInt64Query(c, "tsSeed", 0)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saSeed, err := parseInt64Query(c, "saSeed", 0)
+	tsPerturbCount, err := parseIntQuery(c, "tsPerturbCount", DefaultTSParams().PerturbCount)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saPerturbCount, err := parseIntQuery(c, "saPerturbCount", DefaultSAParams().PerturbCount)
-	if err != nil {
-		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
-		return
-	}
-	saPerturbAfter, err := parseIntQuery(c, "saPerturbAfter", DefaultSAParams().PerturbAfter)
+	tsPerturbAfter, err := parseIntQuery(c, "tsPerturbAfter", DefaultTSParams().PerturbAfter)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
@@ -763,19 +743,18 @@ func GenerateV3MultiRunStreamHandler(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 
-	effectiveSA := SAParams{
-		InitialTemperature: saInitTemp,
-		CoolingRate:        saCoolingRate,
-		Iterations:         saIterations,
-		ProgressEvery:      saProgressEvery,
-		Seed:               saSeed,
-		PerturbCount:       saPerturbCount,
-		PerturbAfter:       saPerturbAfter,
+	effectiveTS := TSParams{
+		TabuTenure:    tsTabuTenure,
+		Iterations:    tsIterations,
+		ProgressEvery: tsProgressEvery,
+		Seed:          tsSeed,
+		PerturbCount:  tsPerturbCount,
+		PerturbAfter:  tsPerturbAfter,
 	}
 
 	baseOpts := GenerateHybridOptions{
 		GA:              gaOpts.Params,
-		SA:              effectiveSA,
+		TS:              effectiveTS,
 		StagnationLimit: stagnationLimit,
 		Restarts:        restarts,
 	}
@@ -784,8 +763,8 @@ func GenerateV3MultiRunStreamHandler(c *gin.Context) {
 		"runs":            runs,
 		"effectiveGa":     gaOpts.Params,
 		"defaultGa":       DefaultGAParams(),
-		"effectiveSa":     effectiveSA,
-		"defaultSa":       DefaultSAParams(),
+		"effectiveTs":     effectiveTS,
+		"defaultTs":       DefaultTSParams(),
 		"stagnationLimit": stagnationLimit,
 		"restarts":        restarts,
 	})
@@ -795,7 +774,7 @@ func GenerateV3MultiRunStreamHandler(c *gin.Context) {
 	results := make([]RunSummary, 0, runs)
 
 	baseSeedGA := baseOpts.GA.Seed
-	baseSeedSA := baseOpts.SA.Seed
+	baseSeedTS := baseOpts.TS.Seed
 
 	for i := 0; i < runs; i++ {
 		if c.Request.Context().Err() != nil {
@@ -807,8 +786,8 @@ func GenerateV3MultiRunStreamHandler(c *gin.Context) {
 		if baseSeedGA != 0 {
 			runOpts.GA.Seed = baseSeedGA + int64(i)
 		}
-		if baseSeedSA != 0 {
-			runOpts.SA.Seed = baseSeedSA + int64(i)
+		if baseSeedTS != 0 {
+			runOpts.TS.Seed = baseSeedTS + int64(i)
 		}
 
 		c.SSEvent("run_start", gin.H{"run": runNum, "totalRuns": runs})
@@ -825,14 +804,14 @@ func GenerateV3MultiRunStreamHandler(c *gin.Context) {
 			if c.Request.Context().Err() != nil {
 				return
 			}
-			c.SSEvent("phase_change", gin.H{"run": runNum, "phase": "sa", "gaResult": r})
+			c.SSEvent("phase_change", gin.H{"run": runNum, "phase": "ts", "gaResult": r})
 			flusher.Flush()
 		}
-		runOpts.OnSAProgress = func(p SAProgressSnapshot) {
+		runOpts.OnTSProgress = func(p TSProgressSnapshot) {
 			if c.Request.Context().Err() != nil {
 				return
 			}
-			c.SSEvent("sa_progress", gin.H{"run": runNum, "progress": p})
+			c.SSEvent("ts_progress", gin.H{"run": runNum, "progress": p})
 			flusher.Flush()
 		}
 
@@ -887,37 +866,32 @@ func GenerateV3ScheduleStreamHandler(c *gin.Context) {
 		return
 	}
 
-	saInitTemp, err := parseFloatQuery(c, "saInitialTemperature", DefaultSAParams().InitialTemperature)
+	tsTabuTenure, err := parseIntQuery(c, "tsTabuTenure", DefaultTSParams().TabuTenure)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saCoolingRate, err := parseFloatQuery(c, "saCoolingRate", DefaultSAParams().CoolingRate)
+	tsIterations, err := parseIntQuery(c, "tsIterations", DefaultTSParams().Iterations)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saIterations, err := parseIntQuery(c, "saIterations", DefaultSAParams().Iterations)
+	tsProgressEvery, err := parseIntQuery(c, "tsProgressEvery", DefaultTSParams().ProgressEvery)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saProgressEvery, err := parseIntQuery(c, "saProgressEvery", DefaultSAParams().ProgressEvery)
+	tsSeed, err := parseInt64Query(c, "tsSeed", 0)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saSeed, err := parseInt64Query(c, "saSeed", 0)
+	tsPerturbCount, err := parseIntQuery(c, "tsPerturbCount", DefaultTSParams().PerturbCount)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
 	}
-	saPerturbCount, err := parseIntQuery(c, "saPerturbCount", DefaultSAParams().PerturbCount)
-	if err != nil {
-		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
-		return
-	}
-	saPerturbAfter, err := parseIntQuery(c, "saPerturbAfter", DefaultSAParams().PerturbAfter)
+	tsPerturbAfter, err := parseIntQuery(c, "tsPerturbAfter", DefaultTSParams().PerturbAfter)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
 		return
@@ -960,21 +934,20 @@ func GenerateV3ScheduleStreamHandler(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 
-	effectiveSA := SAParams{
-		InitialTemperature: saInitTemp,
-		CoolingRate:        saCoolingRate,
-		Iterations:         saIterations,
-		ProgressEvery:      saProgressEvery,
-		Seed:               saSeed,
-		PerturbCount:       saPerturbCount,
-		PerturbAfter:       saPerturbAfter,
+	effectiveTS := TSParams{
+		TabuTenure:    tsTabuTenure,
+		Iterations:    tsIterations,
+		ProgressEvery: tsProgressEvery,
+		Seed:          tsSeed,
+		PerturbCount:  tsPerturbCount,
+		PerturbAfter:  tsPerturbAfter,
 	}
 
 	c.SSEvent("started", gin.H{
 		"effectiveGa":     gaOpts.Params,
 		"defaultGa":       DefaultGAParams(),
-		"effectiveSa":     effectiveSA,
-		"defaultSa":       DefaultSAParams(),
+		"effectiveTs":     effectiveTS,
+		"defaultTs":       DefaultTSParams(),
 		"stagnationLimit": stagnationLimit,
 		"restarts":        restarts,
 	})
@@ -982,7 +955,7 @@ func GenerateV3ScheduleStreamHandler(c *gin.Context) {
 
 	opts := GenerateHybridOptions{
 		GA:                gaOpts.Params,
-		SA:                effectiveSA,
+		TS:                effectiveTS,
 		StagnationLimit:   stagnationLimit,
 		Restarts:          restarts,
 		LoopUntilFeasible: loopUntilFeasible,
@@ -1001,14 +974,14 @@ func GenerateV3ScheduleStreamHandler(c *gin.Context) {
 			if c.Request.Context().Err() != nil {
 				return
 			}
-			c.SSEvent("phase_change", gin.H{"phase": "sa", "gaResult": r})
+			c.SSEvent("phase_change", gin.H{"phase": "ts", "gaResult": r})
 			flusher.Flush()
 		},
-		OnSAProgress: func(p SAProgressSnapshot) {
+		OnTSProgress: func(p TSProgressSnapshot) {
 			if c.Request.Context().Err() != nil {
 				return
 			}
-			c.SSEvent("sa_progress", p)
+			c.SSEvent("ts_progress", p)
 			flusher.Flush()
 		},
 	}
