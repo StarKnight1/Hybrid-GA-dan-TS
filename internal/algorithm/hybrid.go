@@ -4,15 +4,17 @@ import (
 	"time"
 )
 
+// HybridConfig holds configuration for the combined GA+TS optimiser.
 type HybridConfig struct {
 	GA                GAConfig
 	TS                TSConfig
-	Restarts          int            // additional full GA+TS runs; 0 = single run
-	LoopUntilFeasible bool           // keep retrying until unplaced == 0; ignores Restarts limit
-	MaxLoops          int            // max attempts when LoopUntilFeasible=true; 0 = 1000
-	OnGAComplete      func(GAResult) // fires after GA finishes, before TS starts
+	ExtraRuns          int            // additional full GA+TS runs beyond the first; 0 = single run
+	RetryUntilFeasible bool           // keep retrying until unplaced == 0; overrides ExtraRuns
+	MaxAttempts        int            // cap on total runs when RetryUntilFeasible=true; 0 = 1000
+	AfterGA           func(GAResult) // callback fired after GA finishes, before TS starts
 }
 
+// HybridOutput is the result of the combined GA+TS optimisation.
 type HybridResult struct {
 	GAPhase        GAResult
 	TSPhase        TSResult
@@ -21,24 +23,40 @@ type HybridResult struct {
 	Unplaced       int
 	SoftViolations int
 	Elapsed        time.Duration
-	Loops          int // total full GA+TS runs attempted
+	Runs           int // total GA+TS runs attempted
 }
 
+// DefaultHybridConfig returns a HybridConfig with sensible defaults.
 func DefaultHybridConfig() HybridConfig {
 	gaCfg := DefaultGAConfig()
-	gaCfg.StagnationLimit = 100
+	gaCfg.PatienceLimit = 100
 	return HybridConfig{
 		GA: gaCfg,
 		TS: DefaultTSConfig(),
 	}
 }
 
-// RunHybrid runs GA then TS sequentially, repeating for Restarts additional runs.
-// GA explores the search space globally; TS refines the best GA result using matrix-level
-// local search with a tabu list to prevent cycling. The best result across all runs is
-// returned. Each restart uses an offset seed so runs are independent but reproducible.
-// If LoopUntilFeasible is true, it keeps retrying beyond Restarts until unplaced == 0,
-// up to MaxLoops total attempts (default 1000 when MaxLoops == 0).
+// hybridDominates returns true when a is strictly better than b.
+func hybridDominates(a, b HybridResult) bool {
+	return a.Unplaced < b.Unplaced || (a.Unplaced == b.Unplaced && a.SoftViolations < b.SoftViolations)
+}
+
+// isFeasible returns true when the result has no unplaced blocks.
+func isFeasible(r HybridResult) bool { return r.Unplaced == 0 }
+
+// derivedSeeds produces offset GA and TS seeds for run n to keep runs independent
+// but reproducible given the same base configuration.
+func derivedSeeds(cfg HybridConfig, n int) (gaSeed, tsSeed int64) {
+	return cfg.GA.RandSeed + int64(n)*1234567891,
+		cfg.TS.RandSeed + int64(n)*9876543211
+}
+
+// ExecuteHybrid runs GA→TS sequentially, repeating for ExtraRuns additional attempts.
+// GA explores the solution space globally; TS refines the best GA result using
+// matrix-level local search with a tabu list to prevent cycling.
+// The best result across all runs is returned. Each run uses an offset seed so runs
+// are independent but reproducible. When RetryUntilFeasible is set, the optimiser
+// retries beyond ExtraRuns until either unplaced == 0 or MaxAttempts is reached.
 func RunHybrid(
 	blocks []MatrixBlock,
 	candidateIndex map[uint][]Gene,
@@ -46,51 +64,44 @@ func RunHybrid(
 	cfg HybridConfig,
 ) HybridResult {
 	start := time.Now()
-	loops := 0
+	runs := 0
 
-	isBetter := func(a, b HybridResult) bool {
-		return a.Unplaced < b.Unplaced || (a.Unplaced == b.Unplaced && a.SoftViolations < b.SoftViolations)
-	}
-	isFeasible := func(r HybridResult) bool { return r.Unplaced == 0 }
-
-	seedOffset := func(n int) (gaS, tsS int64) {
-		return cfg.GA.Seed + int64(n)*1234567891, cfg.TS.Seed + int64(n)*9876543211
-	}
 	runWithOffset := func(n int) HybridResult {
 		rc := cfg
-		rc.GA.Seed, rc.TS.Seed = seedOffset(n)
-		return runHybridOnce(blocks, candidateIndex, daySlots, rc)
+		rc.GA.RandSeed, rc.TS.RandSeed = derivedSeeds(cfg, n)
+		return singleRun(blocks, candidateIndex, daySlots, rc)
 	}
 
-	best := runHybridOnce(blocks, candidateIndex, daySlots, cfg)
-	loops++
+	best := singleRun(blocks, candidateIndex, daySlots, cfg)
+	runs++
 
-	restarts := cfg.Restarts
-	if cfg.LoopUntilFeasible {
-		maxLoops := cfg.MaxLoops
-		if maxLoops <= 0 {
-			maxLoops = 1000
+	maxRuns := cfg.ExtraRuns
+	if cfg.RetryUntilFeasible {
+		limit := cfg.MaxAttempts
+		if limit <= 0 {
+			limit = 1000
 		}
-		restarts = maxLoops - 1
+		maxRuns = limit - 1
 	}
 
-	for r := 1; r <= restarts; r++ {
+	for r := 1; r <= maxRuns; r++ {
 		if isFeasible(best) {
 			break
 		}
 		result := runWithOffset(r)
-		loops++
-		if isBetter(result, best) {
+		runs++
+		if hybridDominates(result, best) {
 			best = result
 		}
 	}
 
 	best.Elapsed = time.Since(start)
-	best.Loops = loops
+	best.Runs = runs
 	return best
 }
 
-func runHybridOnce(
+// singleRun executes one full GA+TS cycle and returns the result.
+func singleRun(
 	blocks []MatrixBlock,
 	candidateIndex map[uint][]Gene,
 	daySlots DaySlots,
@@ -98,11 +109,12 @@ func runHybridOnce(
 ) HybridResult {
 	gaResult := RunGA(blocks, candidateIndex, daySlots, cfg.GA)
 
-	if cfg.OnGAComplete != nil {
-		cfg.OnGAComplete(gaResult)
+	if cfg.AfterGA != nil {
+		cfg.AfterGA(gaResult)
 	}
 
-	if gaResult.Unplaced == 0 && gaResult.SoftViolations == 0 {
+	perfect := gaResult.Unplaced == 0 && gaResult.SoftViolations == 0
+	if perfect {
 		return HybridResult{
 			GAPhase:        gaResult,
 			Chromosome:     gaResult.Chromosome,

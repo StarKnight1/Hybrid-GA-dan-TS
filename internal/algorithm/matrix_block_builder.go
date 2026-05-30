@@ -6,40 +6,44 @@ import (
 	teachingassignments "smp_mater_dei_be/internal/teaching_assignments"
 )
 
+// GenerateMatrixBlocks converts teaching assignments into schedulable MatrixBlocks.
+// Parallel group blocks (SBP) are placed first in the returned slice so that
+// DecodeChromosome can prioritize them before individual class slots fill up.
 func GenerateMatrixBlocks(assignments []teachingassignments.TeachingAssignment, pjokSubjectID uint) ([]MatrixBlock, error) {
-	// Grouped blocks (SBP) are placed first so DecodeChromosome gives them
-	// priority before other subjects claim their class grid slots.
-	grouped := make([]MatrixBlock, 0, len(assignments))
-	ungrouped := make([]MatrixBlock, 0, len(assignments)*2)
+	parallelList := make([]MatrixBlock, 0, len(assignments))
+	singleList := make([]MatrixBlock, 0, len(assignments)*2)
 
-	var blockID uint = 0
-	for _, assignment := range assignments {
-		durations, err := SplitAssignmentJP(assignment.JP, assignment.SubjectID == pjokSubjectID)
+	nextID := uint(0)
+	for _, assign := range assignments {
+		durationList, err := SplitAssignmentJP(assign.JP, assign.SubjectID == pjokSubjectID)
 		if err != nil {
-			return nil, fmt.Errorf("split assignment %d: %w", assignment.ID, err)
+			return nil, fmt.Errorf("split assignment %d: %w", assign.ID, err)
 		}
-
-		for _, duration := range durations {
-			blockID++
-			b := MatrixBlock{
-				ID:        blockID,
-				TeacherID: assignment.TeacherID,
-				SubjectID: assignment.SubjectID,
-				ClassID:   assignment.ClassID,
-				Duration:  duration,
-				GroupKey:  assignment.GroupKey,
+		for _, dur := range durationList {
+			nextID++
+			blk := MatrixBlock{
+				ID:        nextID,
+				TeacherID: assign.TeacherID,
+				SubjectID: assign.SubjectID,
+				ClassID:   assign.ClassID,
+				Duration:  dur,
+				GroupKey:  assign.GroupKey,
 			}
-			if assignment.GroupKey != nil {
-				grouped = append(grouped, b)
-			} else {
-				ungrouped = append(ungrouped, b)
+			switch assign.GroupKey != nil {
+			case true:
+				parallelList = append(parallelList, blk)
+			default:
+				singleList = append(singleList, blk)
 			}
 		}
 	}
 
-	return append(grouped, ungrouped...), nil
+	return append(parallelList, singleList...), nil
 }
 
+// SplitAssignmentJP breaks a weekly JP total into concrete block durations.
+// PJOK must always be 3 JP and is split into [2, 1] (practical + theory).
+// All other subjects follow the standard decomposition table.
 func SplitAssignmentJP(jp int, isPJOK bool) ([]int, error) {
 	if isPJOK {
 		if jp != 3 {
@@ -48,37 +52,33 @@ func SplitAssignmentJP(jp int, isPJOK bool) ([]int, error) {
 		return []int{2, 1}, nil
 	}
 
-	switch jp {
-	case 1:
-		return []int{1}, nil
-	case 2:
-		return []int{2}, nil
-	case 3:
-		return []int{3}, nil
-	case 4:
-		return []int{2, 2}, nil
-	case 5:
-		return []int{3, 2}, nil
-	case 6:
-		return []int{3, 3}, nil
-	default:
+	table := map[int][]int{
+		1: {1},
+		2: {2},
+		3: {3},
+		4: {2, 2},
+		5: {3, 2},
+		6: {3, 3},
+	}
+	result, ok := table[jp]
+	if !ok {
 		return nil, fmt.Errorf("unsupported JP total %d", jp)
 	}
+	return result, nil
 }
 
-// GroupIndex maps a GroupKey to the indices of all blocks in that group
-// within a given blocks slice. All blocks in a group must share the same
-// (Day, StartSlot) gene — they are scheduled in parallel.
+// GroupMap maps a GroupKey to the indices of all member blocks within a given block slice.
+// Every block sharing the same GroupKey must be scheduled at the same (Day, StartSlot).
 type GroupIndex map[string][]int
 
-// BuildGroupIndex derives group membership from the blocks slice.
+// IndexGroups builds a GroupIndex from a block slice by scanning each block's GroupKey.
 func BuildGroupIndex(blocks []MatrixBlock) GroupIndex {
-	idx := make(GroupIndex)
-	for i, b := range blocks {
-		if b.GroupKey == nil {
+	peta := make(GroupIndex)
+	for posisi, unit := range blocks {
+		if unit.GroupKey == nil {
 			continue
 		}
-		idx[*b.GroupKey] = append(idx[*b.GroupKey], i)
+		peta[*unit.GroupKey] = append(peta[*unit.GroupKey], posisi)
 	}
-	return idx
+	return peta
 }

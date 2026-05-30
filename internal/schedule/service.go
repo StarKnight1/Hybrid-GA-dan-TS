@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"smp_mater_dei_be/internal/algorithm"
+	"smp_mater_dei_be/internal/classes"
 	"smp_mater_dei_be/internal/platform/config"
 	"smp_mater_dei_be/internal/subjects"
 	teachingassignments "smp_mater_dei_be/internal/teaching_assignments"
+	"smp_mater_dei_be/internal/teachers"
 )
 
 
@@ -22,10 +24,13 @@ type GenerateScheduleOptions struct {
 }
 
 type newScheduleBuildContext struct {
-	blocks []algorithm.MatrixBlock
-	index  map[uint][]algorithm.Gene
-	pjokID uint
-	input  InputStats
+	blocks       []algorithm.MatrixBlock
+	index        map[uint][]algorithm.Gene
+	pjokID       uint
+	input        InputStats
+	subjectNames map[uint]string
+	teacherNames map[uint]string
+	classNames   map[uint]string
 }
 
 func NewGenerateScheduleOptions() GenerateScheduleOptions {
@@ -35,12 +40,12 @@ func NewGenerateScheduleOptions() GenerateScheduleOptions {
 func DefaultGAParams() GAParams {
 	cfg := algorithm.DefaultGAConfig()
 	return GAParams{
-		PopulationSize: cfg.PopulationSize,
-		Generations:    cfg.Generations,
-		MutationRate:   cfg.MutationRate,
-		EliteCount:     cfg.EliteCount,
-		TournamentSize: cfg.TournamentSize,
-		ProgressEvery:  cfg.ProgressEvery,
+		PopulationSize: cfg.PopSize,
+		Generations:    cfg.MaxGenerations,
+		MutationRate:   cfg.MutationProb,
+		EliteCount:     cfg.EliteSize,
+		TournamentSize: cfg.TournSize,
+		ProgressEvery:  cfg.ReportInterval,
 	}
 }
 
@@ -135,10 +140,26 @@ func buildNewScheduleContext() (*newScheduleBuildContext, error) {
 		}
 	}
 
+	subjectNames, err := loadSubjectNames()
+	if err != nil {
+		return nil, err
+	}
+	teacherNames, err := loadTeacherNames()
+	if err != nil {
+		return nil, err
+	}
+	classNames, err := loadClassNames()
+	if err != nil {
+		return nil, err
+	}
+
 	return &newScheduleBuildContext{
-		blocks: blocks,
-		index:  index,
-		pjokID: pjokID,
+		blocks:       blocks,
+		index:        index,
+		pjokID:       pjokID,
+		subjectNames: subjectNames,
+		teacherNames: teacherNames,
+		classNames:   classNames,
 		input: InputStats{
 			ActiveAssignments: len(assignments),
 			Blocks:            len(blocks),
@@ -149,7 +170,14 @@ func buildNewScheduleContext() (*newScheduleBuildContext, error) {
 	}, nil
 }
 
-func buildEntriesFromMatrix(blocks []algorithm.MatrixBlock, matrix *algorithm.ScheduleMatrix, daySlots algorithm.DaySlots) []ScheduleEntry {
+func buildEntriesFromMatrix(
+	blocks []algorithm.MatrixBlock,
+	matrix *algorithm.ScheduleMatrix,
+	daySlots algorithm.DaySlots,
+	subjectNames map[uint]string,
+	teacherNames map[uint]string,
+	classNames map[uint]string,
+) []ScheduleEntry {
 	if daySlots == nil {
 		daySlots = algorithm.GenerateSlots()
 	}
@@ -160,18 +188,27 @@ func buildEntriesFromMatrix(blocks []algorithm.MatrixBlock, matrix *algorithm.Sc
 		if !ok {
 			continue
 		}
+		subjName := subjectNames[block.SubjectID]
+		clsName := classNames[block.ClassID]
+		var tchName string
+		if block.TeacherID != nil {
+			tchName = teacherNames[*block.TeacherID]
+		}
 		for offset := 0; offset < placement.Duration; offset++ {
 			start, end := matrixSlotTimeRange(placement.Day, placement.StartSlot+offset, daySlots)
 			if start == "" {
 				continue
 			}
 			entries = append(entries, ScheduleEntry{
-				TeacherID: block.TeacherID,
-				SubjectID: block.SubjectID,
-				ClassID:   block.ClassID,
-				Day:       placement.Day,
-				TimeStart: start,
-				TimeEnd:   end,
+				TeacherID:   block.TeacherID,
+				SubjectID:   block.SubjectID,
+				ClassID:     block.ClassID,
+				SubjectName: subjName,
+				TeacherName: tchName,
+				ClassName:   clsName,
+				Day:         placement.Day,
+				TimeStart:   start,
+				TimeEnd:     end,
 			})
 		}
 	}
@@ -213,11 +250,11 @@ func toV2ProgressSnapshot(p algorithm.GAProgress, totalGenerations int) GAProgre
 func DefaultTSParams() TSParams {
 	cfg := algorithm.DefaultTSConfig()
 	return TSParams{
-		TabuTenure:    cfg.TabuTenure,
-		Iterations:    cfg.Iterations,
-		ProgressEvery: cfg.ProgressEvery,
-		PerturbCount:  cfg.PerturbCount,
-		PerturbAfter:  cfg.PerturbAfter,
+		TabuTenure:    cfg.Tenure,
+		Iterations:    cfg.MaxIterations,
+		ProgressEvery: cfg.ReportInterval,
+		PerturbCount:  cfg.ShakeCount,
+		PerturbAfter:  cfg.ShakeAfter,
 	}
 }
 
@@ -245,16 +282,16 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, 
 	}
 
 	gaCfg := algorithm.DefaultGAConfig()
-	gaCfg.PopulationSize = gaParams.PopulationSize
-	gaCfg.Generations = gaParams.Generations
-	gaCfg.MutationRate = gaParams.MutationRate
-	gaCfg.EliteCount = gaParams.EliteCount
-	gaCfg.TournamentSize = gaParams.TournamentSize
-	gaCfg.Seed = gaParams.Seed
-	gaCfg.ProgressEvery = gaParams.ProgressEvery
-	gaCfg.StagnationLimit = opts.StagnationLimit
-	gaCfg.PJOKSubjectID = ctx.pjokID
-	gaCfg.OnProgress = func(p algorithm.GAProgress) {
+	gaCfg.PopSize = gaParams.PopulationSize
+	gaCfg.MaxGenerations = gaParams.Generations
+	gaCfg.MutationProb = gaParams.MutationRate
+	gaCfg.EliteSize = gaParams.EliteCount
+	gaCfg.TournSize = gaParams.TournamentSize
+	gaCfg.RandSeed = gaParams.Seed
+	gaCfg.ReportInterval = gaParams.ProgressEvery
+	gaCfg.PatienceLimit = opts.StagnationLimit
+	gaCfg.PJOKSubjID = ctx.pjokID
+	gaCfg.OnSnapshot = func(p algorithm.GAProgress) {
 		if opts.OnGAProgress != nil {
 			snap := toV2ProgressSnapshot(p, gaParams.Generations)
 			snap.StagnantGens = p.StagnantGens
@@ -263,26 +300,26 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, 
 	}
 
 	tsCfg := algorithm.DefaultTSConfig()
-	tsCfg.TabuTenure = tsParams.TabuTenure
-	tsCfg.Iterations = tsParams.Iterations
-	tsCfg.ProgressEvery = tsParams.ProgressEvery
-	tsCfg.Seed = tsParams.Seed
-	tsCfg.PerturbCount = tsParams.PerturbCount
-	tsCfg.PerturbAfter = tsParams.PerturbAfter
-	tsCfg.PJOKSubjectID = ctx.pjokID
-	tsCfg.OnProgress = func(p algorithm.TSProgress) {
+	tsCfg.Tenure = tsParams.TabuTenure
+	tsCfg.MaxIterations = tsParams.Iterations
+	tsCfg.ReportInterval = tsParams.ProgressEvery
+	tsCfg.RandSeed = tsParams.Seed
+	tsCfg.ShakeCount = tsParams.PerturbCount
+	tsCfg.ShakeAfter = tsParams.PerturbAfter
+	tsCfg.PJOKSubjID = ctx.pjokID
+	tsCfg.OnSnapshot = func(p algorithm.TSProgress) {
 		if opts.OnTSProgress != nil {
 			opts.OnTSProgress(toTSProgressSnapshot(p, tsParams.Iterations))
 		}
 	}
 
 	hybridCfg := algorithm.HybridConfig{
-		GA:                gaCfg,
-		TS:                tsCfg,
-		Restarts:          opts.Restarts,
-		LoopUntilFeasible: opts.LoopUntilFeasible,
-		MaxLoops:          opts.MaxLoops,
-		OnGAComplete: func(r algorithm.GAResult) {
+		GA:                  gaCfg,
+		TS:                  tsCfg,
+		ExtraRuns:           opts.Restarts,
+		RetryUntilFeasible:  opts.LoopUntilFeasible,
+		MaxAttempts:         opts.MaxLoops,
+		AfterGA: func(r algorithm.GAResult) {
 			if opts.OnGAComplete != nil {
 				opts.OnGAComplete(GAPhaseResult{
 					Unplaced:       r.Unplaced,
@@ -295,7 +332,7 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, 
 	}
 	hybridResult := algorithm.RunHybrid(ctx.blocks, ctx.index, nil, hybridCfg)
 
-	entries := buildEntriesFromMatrix(ctx.blocks, hybridResult.Matrix, nil)
+	entries := buildEntriesFromMatrix(ctx.blocks, hybridResult.Matrix, nil, ctx.subjectNames, ctx.teacherNames, ctx.classNames)
 	hybridSoftBd := algorithm.BreakdownSoftViolations(hybridResult.Matrix, ctx.blocks, ctx.pjokID)
 
 	defaultTS := DefaultTSParams()
@@ -308,16 +345,16 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, 
 			DefaultTS:      &defaultTS,
 			EffectiveTS:    &tsParams,
 			TotalElapsedMs: hybridResult.Elapsed.Milliseconds(),
-			LoopCount:      hybridResult.Loops,
+			LoopCount:      hybridResult.Runs,
 			Result: ResultStats{
 				EntriesGenerated: len(entries),
 				BestFitness:      hybridResult.Unplaced,
 				Violations:       hybridResult.SoftViolations,
 				Unplaced:         hybridResult.Unplaced,
 				SoftBreakdown: SoftBreakdown{
-					SameDaySplit:        hybridSoftBd.SameDaySplit,
-					SameDaySplitGrouped: hybridSoftBd.SameDaySplitGrouped,
-					PJOKAfterDeadline:   hybridSoftBd.PJOKAfterDeadline,
+					SameDaySplit:        hybridSoftBd.DaySplitCount,
+					SameDaySplitGrouped: hybridSoftBd.DaySplitGroupCount,
+					PJOKAfterDeadline:   hybridSoftBd.PJOKOvertime,
 				},
 			},
 		},
@@ -369,6 +406,42 @@ func findPJOKSubjectID() (uint, error) {
 		return 0, err
 	}
 	return s.ID, nil
+}
+
+func loadSubjectNames() (map[uint]string, error) {
+	var rows []subjects.Subject
+	if err := config.DB.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	m := make(map[uint]string, len(rows))
+	for _, s := range rows {
+		m[s.ID] = s.Name
+	}
+	return m, nil
+}
+
+func loadTeacherNames() (map[uint]string, error) {
+	var rows []teachers.Teacher
+	if err := config.DB.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	m := make(map[uint]string, len(rows))
+	for _, t := range rows {
+		m[t.ID] = t.FullName
+	}
+	return m, nil
+}
+
+func loadClassNames() (map[uint]string, error) {
+	var rows []classes.Class
+	if err := config.DB.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	m := make(map[uint]string, len(rows))
+	for _, cl := range rows {
+		m[cl.ID] = cl.Name
+	}
+	return m, nil
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────

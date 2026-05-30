@@ -4,129 +4,136 @@ import (
 	"math/rand"
 )
 
-// placementSnapshot records current block placements without cloning the matrix.
-type placementSnapshot map[uint]Gene
+// matrixSnapshot records the (Day, StartSlot) of every placed block at a point in time.
+// It allows the Tabu Search to save and restore matrix states efficiently without
+// cloning the full grid structure.
+type matrixSnapshot map[uint]Gene
 
-// snapshotFromMatrix builds a snapshot by querying the matrix for every block,
-// bypassing the placed list entirely. This guarantees the snapshot matches
-// the true matrix state even if the placed list diverged due to silent errors.
-func snapshotFromMatrix(matrix *ScheduleMatrix, blocks []MatrixBlock) placementSnapshot {
-	snap := make(placementSnapshot, len(blocks))
-	for _, b := range blocks {
-		if p, ok := matrix.Placement(b.ID); ok {
-			snap[b.ID] = Gene{Day: p.Day, StartSlot: p.StartSlot}
+// captureMatrix reads every block's current placement from the matrix and returns
+// a snapshot. Querying the matrix directly (rather than a placed-block list) ensures
+// the snapshot is always consistent with the true grid state.
+func captureMatrix(matrix *ScheduleMatrix, blocks []MatrixBlock) matrixSnapshot {
+	state := make(matrixSnapshot, len(blocks))
+	for _, blk := range blocks {
+		if rec, ok := matrix.Placement(blk.ID); ok {
+			state[blk.ID] = Gene{Day: rec.Day, StartSlot: rec.StartSlot}
 		}
 	}
-	return snap
+	return state
 }
 
-func rebuildFromSnapshot(snap placementSnapshot, blocks []MatrixBlock, daySlots DaySlots, pjokSubjectID uint) (*ScheduleMatrix, int) {
-	matrix := NewScheduleMatrix(nil, nil, blocks, daySlots)
-	matrix.EnableDayDiversity()
+// restoreMatrix builds a fresh ScheduleMatrix from a previously captured snapshot.
+// Blocks absent from the snapshot or whose gene is unplaced are left unscheduled;
+// the returned integer is the count of such blocks.
+func restoreMatrix(snap matrixSnapshot, blocks []MatrixBlock, daySlots DaySlots, pjokSubjectID uint) (*ScheduleMatrix, int) {
+	grid := NewScheduleMatrix(nil, nil, blocks, daySlots)
+	grid.EnableDayDiversity()
 	if pjokSubjectID != 0 {
-		matrix.ExcludeSubjectFromDayDiversity(pjokSubjectID)
+		grid.ExcludeSubjectFromDayDiversity(pjokSubjectID)
 	}
-	unplaced := 0
-	for _, b := range blocks {
-		g, ok := snap[b.ID]
-		if !ok || !g.IsPlaced() {
-			unplaced++
+	missing := 0
+	for _, blk := range blocks {
+		gene, ok := snap[blk.ID]
+		if !ok || !gene.IsPlaced() {
+			missing++
 			continue
 		}
-		if err := matrix.PlaceBlock(b.ID, g.Day, g.StartSlot); err != nil {
-			unplaced++
+		if err := grid.PlaceBlock(blk.ID, gene.Day, gene.StartSlot); err != nil {
+			missing++
 		}
 	}
-	return matrix, unplaced
+	return grid, missing
 }
 
-func chromosomeFromSnapshot(snap placementSnapshot, blocks []MatrixBlock) Chromosome {
-	c := NewChromosome(len(blocks))
-	for i, b := range blocks {
-		if g, ok := snap[b.ID]; ok {
-			c.Set(i, g)
+// snapshotToChromosome converts a placement snapshot into a Chromosome by encoding
+// each block's recorded position as its corresponding gene.
+func snapshotToChromosome(snap matrixSnapshot, blocks []MatrixBlock) Chromosome {
+	ch := NewChromosome(len(blocks))
+	for idx, blk := range blocks {
+		if gene, ok := snap[blk.ID]; ok {
+			ch.Set(idx, gene)
 		}
 	}
-	return c
+	return ch
 }
 
-// removeID removes the first occurrence of id using swap-with-last (order not preserved).
-func removeID(s []uint, id uint) []uint {
-	for i, v := range s {
-		if v == id {
-			s[i] = s[len(s)-1]
-			return s[:len(s)-1]
+// dropID removes the first occurrence of target from the slice using a swap-with-last
+// strategy. Order is not preserved; returns the original slice when target is absent.
+func dropID(slice []uint, target uint) []uint {
+	for idx, val := range slice {
+		if val == target {
+			slice[idx] = slice[len(slice)-1]
+			return slice[:len(slice)-1]
 		}
 	}
-	return s
+	return slice
 }
 
-// findConflictingBlocks returns all block IDs that would prevent placing block at (day, startSlot).
-func findConflictingBlocks(matrix *ScheduleMatrix, block MatrixBlock, day string, startSlot int) []uint {
+// conflictsAt finds all block IDs that would conflict with placing block at (day, startSlot).
+// Both the class grid and (if the block has a teacher) the teacher grid are checked
+// across all slot offsets within the block's duration window.
+func conflictsAt(matrix *ScheduleMatrix, block MatrixBlock, day string, startSlot int) []uint {
 	seen := make(map[uint]struct{})
-	var conflicts []uint
+	var result []uint
 
 	for offset := 0; offset < block.Duration; offset++ {
-		cell, ok := matrix.ClassCell(block.ClassID, day, startSlot+offset)
-		if !ok || cell.State != CellOccupied {
-			continue
-		}
-		if _, already := seen[cell.BlockID]; !already {
-			seen[cell.BlockID] = struct{}{}
-			conflicts = append(conflicts, cell.BlockID)
-		}
-	}
+		idx := startSlot + offset
 
-	if block.TeacherID != nil {
-		for offset := 0; offset < block.Duration; offset++ {
-			cell, ok := matrix.TeacherCell(*block.TeacherID, day, startSlot+offset)
-			if !ok || cell.State != CellOccupied {
-				continue
-			}
+		if cell, ok := matrix.ClassCell(block.ClassID, day, idx); ok && cell.State == FilledCell {
 			if _, already := seen[cell.BlockID]; !already {
 				seen[cell.BlockID] = struct{}{}
-				conflicts = append(conflicts, cell.BlockID)
+				result = append(result, cell.BlockID)
+			}
+		}
+
+		if block.TeacherID != nil {
+			if cell, ok := matrix.TeacherCell(*block.TeacherID, day, idx); ok && cell.State == FilledCell {
+				if _, already := seen[cell.BlockID]; !already {
+					seen[cell.BlockID] = struct{}{}
+					result = append(result, cell.BlockID)
+				}
 			}
 		}
 	}
 
-	return conflicts
+	return result
 }
 
-// findFreeCandidateForGroup returns the first candidate where every block in the
-// group can be placed simultaneously (i.e. no class conflict for any member).
-// SBP group blocks have no teacher so only the class grid is checked.
-func findFreeCandidateForGroup(matrix *ScheduleMatrix, groupIDs []uint, blockByID map[uint]MatrixBlock, candidates []Gene, rng *rand.Rand) (Gene, bool) {
+// findGroupSlot scans candidates in a random order and returns the first Gene where
+// every block in the parallel group can be placed simultaneously. Returns (Gene{}, false)
+// if no such position exists.
+func findGroupSlot(matrix *ScheduleMatrix, groupIDs []uint, blockByID map[uint]MatrixBlock, candidates []Gene, rng *rand.Rand) (Gene, bool) {
 	if len(candidates) == 0 {
 		return Gene{}, false
 	}
-	start := rng.Intn(len(candidates))
-	for i := 0; i < len(candidates); i++ {
-		g := candidates[(start+i)%len(candidates)]
-		allFree := true
+	startAt := rng.Intn(len(candidates))
+	for attempt := 0; attempt < len(candidates); attempt++ {
+		pos := candidates[(startAt+attempt)%len(candidates)]
+		allClear := true
 		for _, id := range groupIDs {
-			if err := matrix.CanPlaceBlock(id, g.Day, g.StartSlot); err != nil {
-				allFree = false
+			if err := matrix.CanPlaceBlock(id, pos.Day, pos.StartSlot); err != nil {
+				allClear = false
 				break
 			}
 		}
-		if allFree {
-			return g, true
+		if allClear {
+			return pos, true
 		}
 	}
 	return Gene{}, false
 }
 
-// findFreeCandidate scans candidates in random order and returns the first free slot for block.
-func findFreeCandidate(matrix *ScheduleMatrix, block MatrixBlock, candidates []Gene, rng *rand.Rand) (Gene, bool) {
+// findOpenSlot scans candidates in a random order and returns the first Gene that is
+// conflict-free for the given single block. Returns (Gene{}, false) if none is found.
+func findOpenSlot(matrix *ScheduleMatrix, block MatrixBlock, candidates []Gene, rng *rand.Rand) (Gene, bool) {
 	if len(candidates) == 0 {
 		return Gene{}, false
 	}
-	start := rng.Intn(len(candidates))
-	for i := 0; i < len(candidates); i++ {
-		g := candidates[(start+i)%len(candidates)]
-		if err := matrix.CanPlaceBlock(block.ID, g.Day, g.StartSlot); err == nil {
-			return g, true
+	startAt := rng.Intn(len(candidates))
+	for attempt := 0; attempt < len(candidates); attempt++ {
+		pos := candidates[(startAt+attempt)%len(candidates)]
+		if matrix.CanPlaceBlock(block.ID, pos.Day, pos.StartSlot) == nil {
+			return pos, true
 		}
 	}
 	return Gene{}, false

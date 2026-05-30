@@ -6,17 +6,19 @@ import (
 	"time"
 )
 
+// TSConfig holds tunable parameters for the Tabu Search phase.
 type TSConfig struct {
-	TabuTenure    int // iterations a move stays forbidden; 0 uses default 15
-	Iterations    int
-	ProgressEvery int
-	Seed          int64
-	PerturbCount  int // blocks to evict when stagnant; 0 = disabled
-	PerturbAfter  int // iterations without improvement before perturbing; 0 = disabled
-	PJOKSubjectID uint
-	OnProgress    func(TSProgress)
+	Tenure         int // iterations a move stays forbidden; 0 uses default 15
+	MaxIterations  int
+	ReportInterval int
+	RandSeed       int64
+	ShakeCount     int  // blocks to evict when stagnant; 0 = disabled
+	ShakeAfter     int  // iterations without improvement before shaking; 0 = disabled
+	PJOKSubjID     uint
+	OnSnapshot     func(TSProgress)
 }
 
+// TSProgress carries per-iteration metrics emitted via OnSnapshot.
 type TSProgress struct {
 	Iteration             int
 	TabuListSize          int
@@ -27,6 +29,7 @@ type TSProgress struct {
 	Elapsed               time.Duration
 }
 
+// TSResult holds the best solution found by RunTS.
 type TSResult struct {
 	Chromosome     Chromosome
 	Matrix         *ScheduleMatrix
@@ -36,75 +39,327 @@ type TSResult struct {
 	Elapsed        time.Duration
 }
 
+// DefaultTSConfig returns sensible defaults for the Tabu Search phase.
 func DefaultTSConfig() TSConfig {
 	return TSConfig{
-		TabuTenure:    15,
-		Iterations:    200000,
-		ProgressEvery: 5000,
-		Seed:          time.Now().UnixNano(),
-		PerturbCount:  10,
-		PerturbAfter:  15000,
+		Tenure:         15,
+		MaxIterations:  200000,
+		ReportInterval: 5000,
+		RandSeed:       time.Now().UnixNano(),
+		ShakeCount:     10,
+		ShakeAfter:     15000,
 	}
 }
 
-type tabuKey struct {
+// ── Tabu list management ──────────────────────────────────────────────────────
+
+// moveKey is the composite key for a tabu list entry: (block, position) pair.
+type moveKey struct {
 	blockID uint
 	gene    Gene
 }
 
-func isTabu(tabuMap map[tabuKey]int, blockID uint, gene Gene, iter int) bool {
-	exp, ok := tabuMap[tabuKey{blockID, gene}]
-	return ok && exp > iter
+// isForbidden returns true when the given (blockID, gene) move is currently tabu.
+func isForbidden(tabuList map[moveKey]int, blockID uint, gene Gene, iter int) bool {
+	expiry, ok := tabuList[moveKey{blockID, gene}]
+	return ok && expiry > iter
 }
 
-func addTabu(tabuMap map[tabuKey]int, blockID uint, gene Gene, iter, tenure int) {
-	tabuMap[tabuKey{blockID, gene}] = iter + tenure
+// forbidMove adds (blockID, gene) to the tabu list with an expiry of iter+tenure.
+func forbidMove(tabuList map[moveKey]int, blockID uint, gene Gene, iter, tenure int) {
+	tabuList[moveKey{blockID, gene}] = iter + tenure
 }
 
-func pruneTabu(tabuMap map[tabuKey]int, iter int) {
-	for k, exp := range tabuMap {
-		if exp <= iter {
-			delete(tabuMap, k)
+// cleanTabuList removes all entries that have expired by iteration iter.
+func cleanTabuList(tabuList map[moveKey]int, iter int) {
+	for k, expiry := range tabuList {
+		if expiry <= iter {
+			delete(tabuList, k)
 		}
 	}
 }
 
-// relocateGroupTS tries to move an entire parallel group to a new free slot.
-// Accepts if the move is not tabu; allows tabu moves when aspiration criterion is met
-// (result beats global best). Accepted moves record old positions as tabu.
-func relocateGroupTS(
-	matrix *ScheduleMatrix,
+// ── Shared TS state ───────────────────────────────────────────────────────────
+
+// tsState carries all mutable state shared between the unplaced-move and swap-move handlers.
+type tsState struct {
+	grid        *ScheduleMatrix
+	placed      []uint
+	unplaced    []uint
+	currPenalty int
+	tabuList    map[moveKey]int
+	blockByID   map[uint]MatrixBlock
+	groupByID   map[uint][]uint
+	validPos    map[uint]map[Gene]struct{}
+}
+
+// ── Move handlers ─────────────────────────────────────────────────────────────
+
+// handleUnplaced attempts to place one unplaced block, displacing at most two placed
+// blocks when necessary. Returns the net change in unplaced count (negative = improvement).
+func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][]Gene, bestUnplaced, bestPenalty, iter, tenure int, pjokID uint, acak *rand.Rand) {
+	if len(st.unplaced) == 0 {
+		return
+	}
+	targetID := st.unplaced[acak.Intn(len(st.unplaced))]
+	targetBlock := st.blockByID[targetID]
+	candidates := candidateIndex[targetID]
+
+	// Parallel group blocks must be placed together.
+	if groupIDs, isGrouped := st.groupByID[targetID]; isGrouped {
+		if pos, ok := findGroupSlot(st.grid, groupIDs, st.blockByID, candidates, acak); ok {
+			for _, id := range groupIDs {
+				_ = st.grid.PlaceBlock(id, pos.Day, pos.StartSlot)
+				st.unplaced = dropID(st.unplaced, id)
+				st.placed = append(st.placed, id)
+			}
+			st.currPenalty = CountSoftViolations(st.grid, blocks, pjokID)
+		}
+		return
+	}
+
+	if len(candidates) == 0 {
+		return
+	}
+	pos := candidates[acak.Intn(len(candidates))]
+
+	moveTabu := isForbidden(st.tabuList, targetID, pos, iter)
+	aspiration := bestUnplaced > 0
+	if moveTabu && !aspiration {
+		return
+	}
+
+	conflicts := conflictsAt(st.grid, targetBlock, pos.Day, pos.StartSlot)
+
+	switch len(conflicts) {
+	case 0:
+		// Free placement: always accepted (net -1 unplaced).
+		if st.grid.PlaceBlock(targetID, pos.Day, pos.StartSlot) == nil {
+			st.unplaced = dropID(st.unplaced, targetID)
+			st.placed = append(st.placed, targetID)
+			st.currPenalty = CountSoftViolations(st.grid, blocks, pjokID)
+		}
+
+	case 1:
+		// Single displace: evict one placed block, place target, re-place evicted elsewhere.
+		displacedID := conflicts[0]
+		if _, isGroup := st.groupByID[displacedID]; isGroup {
+			break
+		}
+		displacedBlock := st.blockByID[displacedID]
+		origRec, _ := st.grid.Placement(displacedID)
+		origGene := Gene{Day: origRec.Day, StartSlot: origRec.StartSlot}
+
+		_ = st.grid.RemoveBlock(displacedID)
+		st.placed = dropID(st.placed, displacedID)
+		st.unplaced = append(st.unplaced, displacedID)
+
+		if st.grid.PlaceBlock(targetID, pos.Day, pos.StartSlot) != nil {
+			_ = st.grid.PlaceBlock(displacedID, origGene.Day, origGene.StartSlot)
+			st.unplaced = dropID(st.unplaced, displacedID)
+			st.placed = append(st.placed, displacedID)
+			break
+		}
+		st.unplaced = dropID(st.unplaced, targetID)
+		st.placed = append(st.placed, targetID)
+
+		if newPos, ok := findOpenSlot(st.grid, displacedBlock, candidateIndex[displacedID], acak); ok {
+			_ = st.grid.PlaceBlock(displacedID, newPos.Day, newPos.StartSlot)
+			st.unplaced = dropID(st.unplaced, displacedID)
+			st.placed = append(st.placed, displacedID)
+			forbidMove(st.tabuList, displacedID, origGene, iter, tenure)
+		} else {
+			// Trade (net 0): accept; record evicted position as tabu.
+			forbidMove(st.tabuList, displacedID, origGene, iter, tenure)
+		}
+		st.currPenalty = CountSoftViolations(st.grid, blocks, pjokID)
+
+	case 2:
+		// Chain displace: evict two blocks; reject if neither can be re-placed (net +1).
+		d1, d2 := conflicts[0], conflicts[1]
+		if _, ok := st.groupByID[d1]; ok {
+			break
+		}
+		if _, ok := st.groupByID[d2]; ok {
+			break
+		}
+		db1, db2 := st.blockByID[d1], st.blockByID[d2]
+		origRec1, _ := st.grid.Placement(d1)
+		origRec2, _ := st.grid.Placement(d2)
+		origG1 := Gene{Day: origRec1.Day, StartSlot: origRec1.StartSlot}
+		origG2 := Gene{Day: origRec2.Day, StartSlot: origRec2.StartSlot}
+
+		_ = st.grid.RemoveBlock(d1)
+		st.placed = dropID(st.placed, d1)
+		st.unplaced = append(st.unplaced, d1)
+		_ = st.grid.RemoveBlock(d2)
+		st.placed = dropID(st.placed, d2)
+		st.unplaced = append(st.unplaced, d2)
+
+		if st.grid.PlaceBlock(targetID, pos.Day, pos.StartSlot) != nil {
+			_ = st.grid.PlaceBlock(d1, origG1.Day, origG1.StartSlot)
+			st.unplaced = dropID(st.unplaced, d1)
+			st.placed = append(st.placed, d1)
+			_ = st.grid.PlaceBlock(d2, origG2.Day, origG2.StartSlot)
+			st.unplaced = dropID(st.unplaced, d2)
+			st.placed = append(st.placed, d2)
+			break
+		}
+		st.unplaced = dropID(st.unplaced, targetID)
+		st.placed = append(st.placed, targetID)
+
+		p1, ok1 := findOpenSlot(st.grid, db1, candidateIndex[d1], acak)
+		if ok1 {
+			_ = st.grid.PlaceBlock(d1, p1.Day, p1.StartSlot)
+			st.unplaced = dropID(st.unplaced, d1)
+			st.placed = append(st.placed, d1)
+		}
+		p2, ok2 := findOpenSlot(st.grid, db2, candidateIndex[d2], acak)
+		if ok2 {
+			_ = st.grid.PlaceBlock(d2, p2.Day, p2.StartSlot)
+			st.unplaced = dropID(st.unplaced, d2)
+			st.placed = append(st.placed, d2)
+		}
+
+		if ok1 || ok2 {
+			forbidMove(st.tabuList, d1, origG1, iter, tenure)
+			forbidMove(st.tabuList, d2, origG2, iter, tenure)
+			st.currPenalty = CountSoftViolations(st.grid, blocks, pjokID)
+		} else {
+			// net +1: fully revert.
+			_ = st.grid.RemoveBlock(targetID)
+			st.placed = dropID(st.placed, targetID)
+			st.unplaced = append(st.unplaced, targetID)
+			st.unplaced = dropID(st.unplaced, d1)
+			st.unplaced = dropID(st.unplaced, d2)
+			_ = st.grid.PlaceBlock(d1, origG1.Day, origG1.StartSlot)
+			_ = st.grid.PlaceBlock(d2, origG2.Day, origG2.StartSlot)
+			st.placed = append(st.placed, d1, d2)
+		}
+	}
+}
+
+// handleSwap attempts to swap two placed blocks to reduce soft penalty.
+func handleSwap(st *tsState, blocks []MatrixBlock, bestUnplaced, bestPenalty, iter, tenure int, pjokID uint, acak *rand.Rand) {
+	if len(st.placed) < 2 {
+		return
+	}
+	i := acak.Intn(len(st.placed))
+	j := acak.Intn(len(st.placed))
+	for j == i {
+		j = acak.Intn(len(st.placed))
+	}
+	idA, idB := st.placed[i], st.placed[j]
+
+	if groupIDs, ok := st.groupByID[idA]; ok {
+		shiftParallelGroup(st.grid, groupIDs, st.blockByID, validSlotsOf(st, idA), blocks,
+			&st.currPenalty, st.tabuList, iter, tenure, bestUnplaced, bestPenalty, pjokID, acak)
+		return
+	}
+	if groupIDs, ok := st.groupByID[idB]; ok {
+		shiftParallelGroup(st.grid, groupIDs, st.blockByID, validSlotsOf(st, idB), blocks,
+			&st.currPenalty, st.tabuList, iter, tenure, bestUnplaced, bestPenalty, pjokID, acak)
+		return
+	}
+
+	recA, okA := st.grid.Placement(idA)
+	recB, okB := st.grid.Placement(idB)
+	if !okA || !okB {
+		return
+	}
+
+	newPosA := Gene{Day: recB.Day, StartSlot: recB.StartSlot}
+	newPosB := Gene{Day: recA.Day, StartSlot: recA.StartSlot}
+
+	if _, aOK := st.validPos[idA][newPosA]; !aOK {
+		return
+	}
+	if _, bOK := st.validPos[idB][newPosB]; !bOK {
+		return
+	}
+
+	tabuA := isForbidden(st.tabuList, idA, newPosA, iter)
+	tabuB := isForbidden(st.tabuList, idB, newPosB, iter)
+
+	_ = st.grid.RemoveBlock(idA)
+	_ = st.grid.RemoveBlock(idB)
+	errA := st.grid.PlaceBlock(idA, recB.Day, recB.StartSlot)
+	errB := st.grid.PlaceBlock(idB, recA.Day, recA.StartSlot)
+
+	if errA != nil || errB != nil {
+		if errA == nil {
+			_ = st.grid.RemoveBlock(idA)
+		}
+		if errB == nil {
+			_ = st.grid.RemoveBlock(idB)
+		}
+		_ = st.grid.PlaceBlock(idA, recA.Day, recA.StartSlot)
+		_ = st.grid.PlaceBlock(idB, recB.Day, recB.StartSlot)
+		return
+	}
+
+	newPenalty := CountSoftViolations(st.grid, blocks, pjokID)
+	newUnplaced := len(blocks) - st.grid.PlacedCount()
+	aspiration := newUnplaced < bestUnplaced || (newUnplaced == bestUnplaced && newPenalty < bestPenalty)
+
+	if (tabuA || tabuB) && !aspiration {
+		_ = st.grid.RemoveBlock(idA)
+		_ = st.grid.RemoveBlock(idB)
+		_ = st.grid.PlaceBlock(idA, recA.Day, recA.StartSlot)
+		_ = st.grid.PlaceBlock(idB, recB.Day, recB.StartSlot)
+	} else {
+		forbidMove(st.tabuList, idA, Gene{Day: recA.Day, StartSlot: recA.StartSlot}, iter, tenure)
+		forbidMove(st.tabuList, idB, Gene{Day: recB.Day, StartSlot: recB.StartSlot}, iter, tenure)
+		st.currPenalty = newPenalty
+	}
+}
+
+// validSlotsOf retrieves the valid candidate list for a block from the tsState's
+// validPos set (used only inside handleSwap to pass to shiftParallelGroup).
+func validSlotsOf(st *tsState, blockID uint) []Gene {
+	m := st.validPos[blockID]
+	result := make([]Gene, 0, len(m))
+	for g := range m {
+		result = append(result, g)
+	}
+	return result
+}
+
+// shiftParallelGroup tries to relocate an entire SBP parallel group to a new slot.
+// Accepted moves record old positions as tabu; tabu moves are accepted only via aspiration.
+func shiftParallelGroup(
+	grid *ScheduleMatrix,
 	groupIDs []uint,
 	blockByID map[uint]MatrixBlock,
 	candidates []Gene,
 	blocks []MatrixBlock,
-	currentSoft *int,
-	tabuMap map[tabuKey]int,
+	currPenalty *int,
+	tabuList map[moveKey]int,
 	iter, tenure int,
-	bestUnplaced, bestSoft int,
-	pjokSubjectID uint,
-	rng *rand.Rand,
+	bestUnplaced, bestPenalty int,
+	pjokID uint,
+	acak *rand.Rand,
 ) {
 	if len(candidates) == 0 || len(groupIDs) == 0 {
 		return
 	}
 
-	orig := make(map[uint]Gene, len(groupIDs))
+	origPos := make(map[uint]Gene, len(groupIDs))
 	for _, id := range groupIDs {
-		if p, ok := matrix.Placement(id); ok {
-			orig[id] = Gene{Day: p.Day, StartSlot: p.StartSlot}
+		if rec, ok := grid.Placement(id); ok {
+			origPos[id] = Gene{Day: rec.Day, StartSlot: rec.StartSlot}
 		}
 	}
 
 	for _, id := range groupIDs {
-		_ = matrix.RemoveBlock(id)
+		_ = grid.RemoveBlock(id)
 	}
 
-	gene, ok := findFreeCandidateForGroup(matrix, groupIDs, blockByID, candidates, rng)
+	pos, ok := findGroupSlot(grid, groupIDs, blockByID, candidates, acak)
 	if !ok {
 		for _, id := range groupIDs {
-			if g, has := orig[id]; has {
-				_ = matrix.PlaceBlock(id, g.Day, g.StartSlot)
+			if g, has := origPos[id]; has {
+				_ = grid.PlaceBlock(id, g.Day, g.StartSlot)
 			}
 		}
 		return
@@ -112,53 +367,51 @@ func relocateGroupTS(
 
 	anyTabu := false
 	for _, id := range groupIDs {
-		if isTabu(tabuMap, id, gene, iter) {
+		if isForbidden(tabuList, id, pos, iter) {
 			anyTabu = true
 			break
 		}
 	}
 
 	for _, id := range groupIDs {
-		_ = matrix.PlaceBlock(id, gene.Day, gene.StartSlot)
+		_ = grid.PlaceBlock(id, pos.Day, pos.StartSlot)
 	}
-	newSoft := CountSoftViolations(matrix, blocks, pjokSubjectID)
-	newUnplaced := len(blocks) - matrix.PlacedCount()
-	aspiration := newUnplaced < bestUnplaced || (newUnplaced == bestUnplaced && newSoft < bestSoft)
+	newPenalty := CountSoftViolations(grid, blocks, pjokID)
+	newUnplaced := len(blocks) - grid.PlacedCount()
+	aspiration := newUnplaced < bestUnplaced || (newUnplaced == bestUnplaced && newPenalty < bestPenalty)
 
 	if anyTabu && !aspiration {
 		for _, id := range groupIDs {
-			_ = matrix.RemoveBlock(id)
-			if g, has := orig[id]; has {
-				_ = matrix.PlaceBlock(id, g.Day, g.StartSlot)
+			_ = grid.RemoveBlock(id)
+			if g, has := origPos[id]; has {
+				_ = grid.PlaceBlock(id, g.Day, g.StartSlot)
 			}
 		}
 		return
 	}
 
 	for _, id := range groupIDs {
-		if g, has := orig[id]; has {
-			addTabu(tabuMap, id, g, iter, tenure)
+		if g, has := origPos[id]; has {
+			forbidMove(tabuList, id, g, iter, tenure)
 		}
 	}
-	*currentSoft = newSoft
+	*currPenalty = newPenalty
 }
 
-// RunTS applies Tabu Search to refine the best GA solution using direct matrix operations.
+// ── Main entry point ──────────────────────────────────────────────────────────
+
+// RunTS refines the best GA solution using Tabu Search with direct matrix operations.
 //
-// Unlike Simulated Annealing, TS has no temperature or probabilistic acceptance.
-// Instead a tabu list forbids recently-undone moves for TabuTenure iterations, preventing
-// cycling. Non-tabu moves are always accepted (even when they worsen the objective),
-// enabling diversification. Tabu moves are accepted only when the aspiration criterion
-// is met: the resulting solution strictly beats the global best.
+// Accepted move types:
+//   - Free placement: unplaced block → empty slot (net -1 unplaced, always accepted)
+//   - Single displace: unplaced block displaces one placed block which is re-placed elsewhere
+//   - Chain displace: unplaced block displaces two placed blocks (rejected if net +1)
+//   - Swap: two placed blocks exchange slots to reduce soft penalty
 //
-// Move types are identical to RunSA:
-//   - Free placement: unplaced block finds a free slot — always accepted (net -1 unplaced).
-//   - Single displace: unplaced block displaces one placed block; displaced is re-placed or traded.
-//   - Chain displace: unplaced block displaces two placed blocks; net +1 always rejected.
-//   - Swap: two placed blocks exchange positions to reduce soft violations.
-//
-// Perturbation: when best hasn't improved for PerturbAfter iterations, PerturbCount random
-// placed blocks are evicted to escape local optima without a full restart.
+// The tabu list forbids recently undone moves for Tenure iterations, preventing cycling.
+// Tabu moves are accepted when the aspiration criterion is met (result beats global best).
+// Perturbation (shaking): when best is stagnant for ShakeAfter iterations, ShakeCount
+// random placed blocks are evicted to escape local optima.
 func RunTS(
 	gaResult GAResult,
 	blocks []MatrixBlock,
@@ -170,7 +423,7 @@ func RunTS(
 	if daySlots == nil {
 		daySlots = GenerateSlots()
 	}
-	rng := rand.New(rand.NewSource(cfg.Seed))
+	acak := rand.New(rand.NewSource(cfg.RandSeed))
 
 	blockByID := make(map[uint]MatrixBlock, len(blocks))
 	for _, b := range blocks {
@@ -191,50 +444,61 @@ func RunTS(
 
 	validPos := make(map[uint]map[Gene]struct{}, len(blocks))
 	for _, b := range blocks {
-		s := make(map[Gene]struct{}, len(candidateIndex[b.ID]))
+		posSet := make(map[Gene]struct{}, len(candidateIndex[b.ID]))
 		for _, g := range candidateIndex[b.ID] {
-			s[g] = struct{}{}
+			posSet[g] = struct{}{}
 		}
-		validPos[b.ID] = s
+		validPos[b.ID] = posSet
 	}
 
-	matrix, _ := rebuildFromSnapshot(snapshotFromMatrix(gaResult.Matrix, blocks), blocks, daySlots, cfg.PJOKSubjectID)
+	grid, _ := restoreMatrix(captureMatrix(gaResult.Matrix, blocks), blocks, daySlots, cfg.PJOKSubjID)
 
 	placed := make([]uint, 0, len(blocks))
 	unplaced := make([]uint, 0, len(blocks))
 	for _, b := range blocks {
-		if _, ok := matrix.Placement(b.ID); ok {
+		if _, ok := grid.Placement(b.ID); ok {
 			placed = append(placed, b.ID)
 		} else {
 			unplaced = append(unplaced, b.ID)
 		}
 	}
 
-	currentSoft := CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
-	bestUnplaced := len(blocks) - matrix.PlacedCount()
-	bestSoft := currentSoft
-	bestSnap := snapshotFromMatrix(matrix, blocks)
-
-	tenure := cfg.TabuTenure
+	tenure := cfg.Tenure
 	if tenure <= 0 {
 		tenure = 15
 	}
-	tabuMap := make(map[tabuKey]int)
 
-	perturbStagnant := 0
-	perturbCount := 0
-	lastUnplacedIter := -1
-	fmt.Printf("[TS diag] start: unplaced=%d softViolations=%d tabuTenure=%d\n", bestUnplaced, bestSoft, tenure)
+	pjokID := cfg.PJOKSubjID
+	st := &tsState{
+		grid:        grid,
+		placed:      placed,
+		unplaced:    unplaced,
+		currPenalty: CountSoftViolations(grid, blocks, pjokID),
+		tabuList:    make(map[moveKey]int),
+		blockByID:   blockByID,
+		groupByID:   groupByID,
+		validPos:    validPos,
+	}
 
-	emit := func(iter int) {
-		if cfg.OnProgress != nil {
-			cfg.OnProgress(TSProgress{
+	bestUnplaced := len(blocks) - grid.PlacedCount()
+	bestPenalty := st.currPenalty
+	bestSnap := captureMatrix(grid, blocks)
+
+	shakeStagnant := 0
+	shakeCount := 0
+	lastFeasibleIter := -1
+
+	fmt.Printf("[tabu-search] start: unplaced=%d penalty=%d tenure=%d\n", bestUnplaced, bestPenalty, tenure)
+
+	report := func(iter int) {
+		if cfg.OnSnapshot != nil {
+			cfg.OnSnapshot(TSProgress{
 				Iteration:             iter,
-				TabuListSize:          len(tabuMap),
-				CurrentUnplaced:       len(blocks) - matrix.PlacedCount(),
-				CurrentSoftViolations: currentSoft,
+				TabuListSize:          len(st.tabuList),
+				CurrentUnplaced:       len(blocks) - st.grid.PlacedCount(),
+				CurrentSoftViolations: st.currPenalty,
 				BestUnplaced:          bestUnplaced,
-				BestSoftViolations:    bestSoft,
+				BestSoftViolations:    bestPenalty,
 				Elapsed:               time.Since(start),
 			})
 		}
@@ -243,264 +507,51 @@ func RunTS(
 	lastIter := 0
 	emittedLast := false
 
-	for iter := 1; iter <= cfg.Iterations; iter++ {
-		if bestUnplaced == 0 && bestSoft == 0 {
+	for iter := 1; iter <= cfg.MaxIterations; iter++ {
+		if bestUnplaced == 0 && bestPenalty == 0 {
 			break
 		}
 		lastIter = iter
 
 		if iter%1000 == 0 {
-			pruneTabu(tabuMap, iter)
+			cleanTabuList(st.tabuList, iter)
 		}
 
-		doSwap := len(unplaced) == 0 || (len(placed) >= 2 && rng.Float64() >= 0.8)
+		doSwap := len(st.unplaced) == 0 || (len(st.placed) >= 2 && acak.Float64() >= 0.8)
 
-		if !doSwap && len(unplaced) > 0 {
-			// ----- unplaced move -----
-			targetID := unplaced[rng.Intn(len(unplaced))]
-			targetBlock := blockByID[targetID]
-			candidates := candidateIndex[targetID]
-
-			// Grouped blocks must be placed together.
-			if groupIDs, isGrouped := groupByID[targetID]; isGrouped {
-				if gene, ok := findFreeCandidateForGroup(matrix, groupIDs, blockByID, candidates, rng); ok {
-					for _, id := range groupIDs {
-						_ = matrix.PlaceBlock(id, gene.Day, gene.StartSlot)
-						unplaced = removeID(unplaced, id)
-						placed = append(placed, id)
-					}
-					currentSoft = CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
-				}
-				continue
-			}
-
-			if len(candidates) == 0 {
-				continue
-			}
-			gene := candidates[rng.Intn(len(candidates))]
-
-			// Aspiration: placing an unplaced block always improves when bestUnplaced > 0.
-			moveTabu := isTabu(tabuMap, targetID, gene, iter)
-			aspiration := bestUnplaced > 0
-			if moveTabu && !aspiration {
-				continue
-			}
-
-			conflicts := findConflictingBlocks(matrix, targetBlock, gene.Day, gene.StartSlot)
-
-			switch len(conflicts) {
-			case 0:
-				// Free placement: net -1, always accept. No old position to record as tabu.
-				if matrix.PlaceBlock(targetID, gene.Day, gene.StartSlot) == nil {
-					unplaced = removeID(unplaced, targetID)
-					placed = append(placed, targetID)
-					currentSoft = CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
-				}
-
-			case 1:
-				// Single displace: remove blocking block, place target, re-place displaced.
-				displacedID := conflicts[0]
-				if _, isGroupMember := groupByID[displacedID]; isGroupMember {
-					break
-				}
-				displacedBlock := blockByID[displacedID]
-				origDP, _ := matrix.Placement(displacedID)
-				origDGene := Gene{Day: origDP.Day, StartSlot: origDP.StartSlot}
-
-				_ = matrix.RemoveBlock(displacedID)
-				placed = removeID(placed, displacedID)
-				unplaced = append(unplaced, displacedID)
-
-				if matrix.PlaceBlock(targetID, gene.Day, gene.StartSlot) != nil {
-					// Day diversity or other constraint rejected targetID — restore.
-					_ = matrix.PlaceBlock(displacedID, origDGene.Day, origDGene.StartSlot)
-					unplaced = removeID(unplaced, displacedID)
-					placed = append(placed, displacedID)
-					break
-				}
-				unplaced = removeID(unplaced, targetID)
-				placed = append(placed, targetID)
-
-				if newGene, ok := findFreeCandidate(matrix, displacedBlock, candidateIndex[displacedID], rng); ok {
-					// Re-placed: net -1, always accept. Record displaced's old position as tabu.
-					_ = matrix.PlaceBlock(displacedID, newGene.Day, newGene.StartSlot)
-					unplaced = removeID(unplaced, displacedID)
-					placed = append(placed, displacedID)
-					addTabu(tabuMap, displacedID, origDGene, iter, tenure)
-					currentSoft = CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
-				} else {
-					// Trade (net 0): in TS, accept unconditionally (tabu/aspiration already checked).
-					addTabu(tabuMap, displacedID, origDGene, iter, tenure)
-					currentSoft = CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
-				}
-
-			case 2:
-				// Chain displace: remove both blockers, place target, re-place both.
-				d1, d2 := conflicts[0], conflicts[1]
-				if _, ok := groupByID[d1]; ok {
-					break
-				}
-				if _, ok := groupByID[d2]; ok {
-					break
-				}
-				db1, db2 := blockByID[d1], blockByID[d2]
-				origP1, _ := matrix.Placement(d1)
-				origP2, _ := matrix.Placement(d2)
-				origG1 := Gene{Day: origP1.Day, StartSlot: origP1.StartSlot}
-				origG2 := Gene{Day: origP2.Day, StartSlot: origP2.StartSlot}
-
-				_ = matrix.RemoveBlock(d1)
-				placed = removeID(placed, d1)
-				unplaced = append(unplaced, d1)
-				_ = matrix.RemoveBlock(d2)
-				placed = removeID(placed, d2)
-				unplaced = append(unplaced, d2)
-
-				if matrix.PlaceBlock(targetID, gene.Day, gene.StartSlot) != nil {
-					// Restore d1, d2 and abort.
-					_ = matrix.PlaceBlock(d1, origG1.Day, origG1.StartSlot)
-					unplaced = removeID(unplaced, d1)
-					placed = append(placed, d1)
-					_ = matrix.PlaceBlock(d2, origG2.Day, origG2.StartSlot)
-					unplaced = removeID(unplaced, d2)
-					placed = append(placed, d2)
-					break
-				}
-				unplaced = removeID(unplaced, targetID)
-				placed = append(placed, targetID)
-
-				g1, ok1 := findFreeCandidate(matrix, db1, candidateIndex[d1], rng)
-				if ok1 {
-					_ = matrix.PlaceBlock(d1, g1.Day, g1.StartSlot)
-					unplaced = removeID(unplaced, d1)
-					placed = append(placed, d1)
-				}
-				g2, ok2 := findFreeCandidate(matrix, db2, candidateIndex[d2], rng)
-				if ok2 {
-					_ = matrix.PlaceBlock(d2, g2.Day, g2.StartSlot)
-					unplaced = removeID(unplaced, d2)
-					placed = append(placed, d2)
-				}
-
-				if ok1 || ok2 {
-					// net -1 (both ok) or net 0 (one ok): accept, record tabu for evicted positions.
-					addTabu(tabuMap, d1, origG1, iter, tenure)
-					addTabu(tabuMap, d2, origG2, iter, tenure)
-					currentSoft = CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
-				} else {
-					// net +1: always reject — fully revert.
-					_ = matrix.RemoveBlock(targetID)
-					placed = removeID(placed, targetID)
-					unplaced = append(unplaced, targetID)
-					unplaced = removeID(unplaced, d1)
-					unplaced = removeID(unplaced, d2)
-					_ = matrix.PlaceBlock(d1, origG1.Day, origG1.StartSlot)
-					_ = matrix.PlaceBlock(d2, origG2.Day, origG2.StartSlot)
-					placed = append(placed, d1, d2)
-				}
-			}
-
-		} else if len(placed) >= 2 {
-			// ----- swap move -----
-			i := rng.Intn(len(placed))
-			j := rng.Intn(len(placed))
-			for j == i {
-				j = rng.Intn(len(placed))
-			}
-			idA, idB := placed[i], placed[j]
-
-			if groupIDs, ok := groupByID[idA]; ok {
-				relocateGroupTS(matrix, groupIDs, blockByID, candidateIndex[idA], blocks,
-					&currentSoft, tabuMap, iter, tenure, bestUnplaced, bestSoft, cfg.PJOKSubjectID, rng)
-				continue
-			}
-			if groupIDs, ok := groupByID[idB]; ok {
-				relocateGroupTS(matrix, groupIDs, blockByID, candidateIndex[idB], blocks,
-					&currentSoft, tabuMap, iter, tenure, bestUnplaced, bestSoft, cfg.PJOKSubjectID, rng)
-				continue
-			}
-
-			pA, okA := matrix.Placement(idA)
-			pB, okB := matrix.Placement(idB)
-			if !okA || !okB {
-				continue
-			}
-
-			newGeneA := Gene{Day: pB.Day, StartSlot: pB.StartSlot}
-			newGeneB := Gene{Day: pA.Day, StartSlot: pA.StartSlot}
-
-			if _, aOK := validPos[idA][newGeneA]; !aOK {
-				continue
-			}
-			if _, bOK := validPos[idB][newGeneB]; !bOK {
-				continue
-			}
-
-			swapTabuA := isTabu(tabuMap, idA, newGeneA, iter)
-			swapTabuB := isTabu(tabuMap, idB, newGeneB, iter)
-
-			_ = matrix.RemoveBlock(idA)
-			_ = matrix.RemoveBlock(idB)
-			errA := matrix.PlaceBlock(idA, pB.Day, pB.StartSlot)
-			errB := matrix.PlaceBlock(idB, pA.Day, pA.StartSlot)
-
-			if errA != nil || errB != nil {
-				if errA == nil {
-					_ = matrix.RemoveBlock(idA)
-				}
-				if errB == nil {
-					_ = matrix.RemoveBlock(idB)
-				}
-				_ = matrix.PlaceBlock(idA, pA.Day, pA.StartSlot)
-				_ = matrix.PlaceBlock(idB, pB.Day, pB.StartSlot)
-				continue
-			}
-
-			newSoft := CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
-			newUnplaced := len(blocks) - matrix.PlacedCount()
-			aspiration := newUnplaced < bestUnplaced || (newUnplaced == bestUnplaced && newSoft < bestSoft)
-
-			if (swapTabuA || swapTabuB) && !aspiration {
-				// Tabu and no aspiration: revert.
-				_ = matrix.RemoveBlock(idA)
-				_ = matrix.RemoveBlock(idB)
-				_ = matrix.PlaceBlock(idA, pA.Day, pA.StartSlot)
-				_ = matrix.PlaceBlock(idB, pB.Day, pB.StartSlot)
-			} else {
-				// Accept: record old positions as tabu to prevent immediate undo.
-				addTabu(tabuMap, idA, Gene{Day: pA.Day, StartSlot: pA.StartSlot}, iter, tenure)
-				addTabu(tabuMap, idB, Gene{Day: pB.Day, StartSlot: pB.StartSlot}, iter, tenure)
-				currentSoft = newSoft
-			}
+		if !doSwap {
+			handleUnplaced(st, blocks, candidateIndex, bestUnplaced, bestPenalty, iter, tenure, pjokID, acak)
+		} else {
+			handleSwap(st, blocks, bestUnplaced, bestPenalty, iter, tenure, pjokID, acak)
 		}
 
-		matrixUnplaced := len(blocks) - matrix.PlacedCount()
-		if matrixUnplaced < bestUnplaced || (matrixUnplaced == bestUnplaced && currentSoft < bestSoft) {
-			bestUnplaced = matrixUnplaced
-			bestSoft = currentSoft
-			bestSnap = snapshotFromMatrix(matrix, blocks)
-			perturbStagnant = 0
-			if bestUnplaced == 0 && lastUnplacedIter == -1 {
-				lastUnplacedIter = iter
-				fmt.Printf("[TS diag] last unplaced block placed at iteration %d (%.1f%% of budget)\n",
-					iter, float64(iter)/float64(cfg.Iterations)*100)
+		currUnplaced := len(blocks) - st.grid.PlacedCount()
+		if currUnplaced < bestUnplaced || (currUnplaced == bestUnplaced && st.currPenalty < bestPenalty) {
+			bestUnplaced = currUnplaced
+			bestPenalty = st.currPenalty
+			bestSnap = captureMatrix(st.grid, blocks)
+			shakeStagnant = 0
+			if bestUnplaced == 0 && lastFeasibleIter == -1 {
+				lastFeasibleIter = iter
+				fmt.Printf("[tabu-search] all blocks placed at iteration %d (%.1f%% of budget)\n",
+					iter, float64(iter)/float64(cfg.MaxIterations)*100)
 			}
 		} else {
-			perturbStagnant++
+			shakeStagnant++
 		}
 
-		if cfg.PerturbAfter > 0 && cfg.PerturbCount > 0 && perturbStagnant >= cfg.PerturbAfter {
-			count := cfg.PerturbCount
-			if count > len(placed) {
-				count = len(placed)
+		if cfg.ShakeAfter > 0 && cfg.ShakeCount > 0 && shakeStagnant >= cfg.ShakeAfter {
+			evictCount := cfg.ShakeCount
+			if evictCount > len(st.placed) {
+				evictCount = len(st.placed)
 			}
 			evicted := make(map[uint]bool)
-			for k := 0; k < count; k++ {
-				if len(placed) == 0 {
+			for k := 0; k < evictCount; k++ {
+				if len(st.placed) == 0 {
 					break
 				}
-				idx := rng.Intn(len(placed))
-				id := placed[idx]
+				idx := acak.Intn(len(st.placed))
+				id := st.placed[idx]
 				if evicted[id] {
 					continue
 				}
@@ -513,20 +564,20 @@ func RunTS(
 						continue
 					}
 					evicted[eid] = true
-					_ = matrix.RemoveBlock(eid)
-					placed = removeID(placed, eid)
-					unplaced = append(unplaced, eid)
+					_ = st.grid.RemoveBlock(eid)
+					st.placed = dropID(st.placed, eid)
+					st.unplaced = append(st.unplaced, eid)
 				}
 			}
-			currentSoft = CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
-			perturbStagnant = 0
-			perturbCount++
-			fmt.Printf("[TS diag] perturbation #%d at iteration %d, evicted %d blocks, unplaced now=%d\n",
-				perturbCount, iter, count, len(unplaced))
+			st.currPenalty = CountSoftViolations(st.grid, blocks, cfg.PJOKSubjID)
+			shakeStagnant = 0
+			shakeCount++
+			fmt.Printf("[tabu-search] shake #%d at iteration %d, evicted %d blocks, unplaced now=%d\n",
+				shakeCount, iter, evictCount, len(st.unplaced))
 		}
 
-		if cfg.ProgressEvery > 0 && iter%cfg.ProgressEvery == 0 {
-			emit(iter)
+		if cfg.ReportInterval > 0 && iter%cfg.ReportInterval == 0 {
+			report(iter)
 			emittedLast = true
 		} else {
 			emittedLast = false
@@ -534,26 +585,26 @@ func RunTS(
 	}
 
 	if !emittedLast {
-		emit(lastIter)
+		report(lastIter)
 	}
 
-	if lastUnplacedIter == -1 {
-		fmt.Printf("[TS diag] finished %d iters, unplaced never reached 0 (best=%d), perturbations=%d\n",
-			lastIter, bestUnplaced, perturbCount)
+	if lastFeasibleIter == -1 {
+		fmt.Printf("[tabu-search] finished %d iters, unplaced never reached 0 (best=%d), shakes=%d\n",
+			lastIter, bestUnplaced, shakeCount)
 	} else {
-		fmt.Printf("[TS diag] finished %d iters, unplaced→0 at iter %d, perturbations=%d, finalSoft=%d\n",
-			lastIter, lastUnplacedIter, perturbCount, bestSoft)
+		fmt.Printf("[tabu-search] finished %d iters, feasible at iter %d, shakes=%d, finalPenalty=%d\n",
+			lastIter, lastFeasibleIter, shakeCount, bestPenalty)
 	}
 
-	bestMatrix, actualUnplaced := rebuildFromSnapshot(bestSnap, blocks, daySlots, cfg.PJOKSubjectID)
-	actualSoft := CountSoftViolations(bestMatrix, blocks, cfg.PJOKSubjectID)
-	bestChromosome := chromosomeFromSnapshot(bestSnap, blocks)
+	bestGrid, actualUnplaced := restoreMatrix(bestSnap, blocks, daySlots, cfg.PJOKSubjID)
+	actualPenalty := CountSoftViolations(bestGrid, blocks, cfg.PJOKSubjID)
+	bestChromosome := snapshotToChromosome(bestSnap, blocks)
 
 	return TSResult{
 		Chromosome:     bestChromosome,
-		Matrix:         bestMatrix,
+		Matrix:         bestGrid,
 		Unplaced:       actualUnplaced,
-		SoftViolations: actualSoft,
+		SoftViolations: actualPenalty,
 		Iterations:     lastIter,
 		Elapsed:        time.Since(start),
 	}

@@ -3,12 +3,15 @@ package schedule
 // ScheduleEntry is one generated 1-JP timetable row.
 // One JP is always 40 minutes.
 type ScheduleEntry struct {
-	TeacherID *uint  `json:"teacherId,omitempty"`
-	SubjectID uint   `json:"subjectId"`
-	ClassID   uint   `json:"classId"`
-	Day       string `json:"day"`
-	TimeStart string `json:"timeStart"`
-	TimeEnd   string `json:"timeEnd"`
+	TeacherID   *uint  `json:"teacherId,omitempty"`
+	SubjectID   uint   `json:"subjectId"`
+	ClassID     uint   `json:"classId"`
+	SubjectName string `json:"subjectName"`
+	TeacherName string `json:"teacherName,omitempty"`
+	ClassName   string `json:"className"`
+	Day         string `json:"day"`
+	TimeStart   string `json:"timeStart"`
+	TimeEnd     string `json:"timeEnd"`
 }
 
 // GAParams contains tunable parameters for schedule generation.

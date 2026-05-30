@@ -7,19 +7,21 @@ import (
 	"time"
 )
 
+// GAConfig contains tunable parameters for the genetic algorithm.
 type GAConfig struct {
-	PopulationSize  int
-	Generations     int
-	MutationRate    float64
-	EliteCount      int
-	TournamentSize  int
-	Seed            int64
-	ProgressEvery   int
-	StagnationLimit int // stop early if best hasn't improved for this many generations; 0 = disabled
-	OnProgress      func(GAProgress)
-	PJOKSubjectID   uint
+	PopSize        int
+	MaxGenerations int
+	MutationProb   float64
+	EliteSize      int
+	TournSize      int
+	RandSeed       int64
+	ReportInterval int
+	PatienceLimit  int // stop early when best hasn't improved for this many generations; 0 = disabled
+	OnSnapshot     func(GAProgress)
+	PJOKSubjID     uint
 }
 
+// GAProgress carries per-generation metrics emitted via OnSnapshot.
 type GAProgress struct {
 	Generation         int
 	BestUnplaced       int
@@ -29,6 +31,7 @@ type GAProgress struct {
 	Elapsed            time.Duration
 }
 
+// GAResult holds the best solution found by RunGA.
 type GAResult struct {
 	Chromosome     Chromosome
 	Matrix         *ScheduleMatrix
@@ -38,34 +41,63 @@ type GAResult struct {
 	Elapsed        time.Duration
 }
 
+// DefaultGAConfig returns sensible defaults suitable for most school scheduling instances.
 func DefaultGAConfig() GAConfig {
 	return GAConfig{
-		PopulationSize: 100,
-		Generations:    1000,
-		MutationRate:   0.02,
-		EliteCount:     5,
-		TournamentSize: 3,
-		Seed:           time.Now().UnixNano(),
-		ProgressEvery:  50,
+		PopSize:        100,
+		MaxGenerations: 1000,
+		MutationProb:   0.02,
+		EliteSize:      5,
+		TournSize:      3,
+		RandSeed:       time.Now().UnixNano(),
+		ReportInterval: 50,
 	}
 }
 
-type individual struct {
-	chromosome     Chromosome
-	unplaced       int
-	softViolations int
+// candidate is one member of the GA population with its decoded fitness.
+type candidate struct {
+	genome      Chromosome
+	unplaced    int
+	softPenalty int
 }
 
-func betterThan(a, b individual) bool {
+// dominates returns true when a is strictly better than b.
+// Unplaced count is minimised first, then soft penalty.
+func dominates(a, b candidate) bool {
 	if a.unplaced != b.unplaced {
 		return a.unplaced < b.unplaced
 	}
-	return a.softViolations < b.softViolations
+	return a.softPenalty < b.softPenalty
 }
 
-// RunGA runs a pure genetic algorithm over the given blocks and candidate index.
-// It returns the best chromosome found and the decoded matrix.
-// A result with Unplaced == 0 is a fully valid schedule.
+// mutDiag accumulates diagnostic counters for the repairUnplaced step.
+type mutDiag struct {
+	calls, hits, sumBefore, sumAfter int
+}
+
+func (d *mutDiag) record(before, after int) {
+	d.calls++
+	d.sumBefore += before
+	d.sumAfter += after
+	if after < before {
+		d.hits++
+	}
+}
+
+func (d *mutDiag) print() {
+	if d.calls == 0 {
+		return
+	}
+	avgBefore := float64(d.sumBefore) / float64(d.calls)
+	avgAfter := float64(d.sumAfter) / float64(d.calls)
+	fmt.Printf("[GA diag] repairUnplaced: calls=%d improved=%d (%.1f%%) avgBefore=%.2f avgAfter=%.2f avgDelta=%.2f\n",
+		d.calls, d.hits,
+		float64(d.hits)/float64(d.calls)*100,
+		avgBefore, avgAfter, avgBefore-avgAfter)
+}
+
+// RunGA executes the genetic algorithm and returns the best chromosome found.
+// A result with Unplaced == 0 is a fully feasible schedule.
 func RunGA(
 	blocks []MatrixBlock,
 	candidateIndex map[uint][]Gene,
@@ -73,85 +105,79 @@ func RunGA(
 	cfg GAConfig,
 ) GAResult {
 	start := time.Now()
-	rng := rand.New(rand.NewSource(cfg.Seed))
-	groups := BuildGroupIndex(blocks)
+	acak := rand.New(rand.NewSource(cfg.RandSeed))
+	indeksGrup := BuildGroupIndex(blocks)
 
-	pop := initPopulation(blocks, candidateIndex, daySlots, cfg.PopulationSize, cfg.PJOKSubjectID, groups, rng)
-	sortPopulation(pop)
-	best := pop[0]
+	population := buildPopulation(blocks, candidateIndex, daySlots, cfg.PopSize, cfg.PJOKSubjID, indeksGrup, acak)
+	rankPopulation(population)
+	bestSol := population[0]
 
-	stagnantGens := 0
-	emit := func(gen int) {
-		if cfg.OnProgress != nil {
-			cfg.OnProgress(GAProgress{
+	stagnant := 0
+	diag := &mutDiag{}
+
+	report := func(gen int) {
+		if cfg.OnSnapshot != nil {
+			cfg.OnSnapshot(GAProgress{
 				Generation:         gen,
-				BestUnplaced:       best.unplaced,
-				BestSoftViolations: best.softViolations,
-				AvgUnplaced:        avgUnplaced(pop),
-				StagnantGens:       stagnantGens,
+				BestUnplaced:       bestSol.unplaced,
+				BestSoftViolations: bestSol.softPenalty,
+				AvgUnplaced:        meanUnplaced(population),
+				StagnantGens:       stagnant,
 				Elapsed:            time.Since(start),
 			})
 		}
 	}
 
-	// mutateUnplaced diagnostic counters
-	var mutateCalls, mutateImproved, mutateTotalBefore, mutateTotalAfter int
-
 	lastGen := 0
 	emittedLastGen := false
-	for gen := 1; gen <= cfg.Generations; gen++ {
-		if best.unplaced == 0 && best.softViolations == 0 {
+
+	for gen := 1; gen <= cfg.MaxGenerations; gen++ {
+		if bestSol.unplaced == 0 && bestSol.softPenalty == 0 {
 			break
 		}
 		lastGen = gen
 
-		next := make([]individual, 0, cfg.PopulationSize)
-
-		for i := 0; i < cfg.EliteCount && i < len(pop); i++ {
-			next = append(next, pop[i])
+		nextGen := make([]candidate, 0, cfg.PopSize)
+		for i := 0; i < cfg.EliteSize && i < len(population); i++ {
+			nextGen = append(nextGen, population[i])
 		}
 
-		for len(next) < cfg.PopulationSize {
-			parentA := tournamentSelect(pop, cfg.TournamentSize, rng)
-			parentB := tournamentSelect(pop, cfg.TournamentSize, rng)
-			child := ConstraintAwareCrossover(parentA.chromosome, parentB.chromosome, blocks, candidateIndex, groups, daySlots, cfg.PJOKSubjectID, rng)
-			applyMutation(&child, blocks, candidateIndex, groups, cfg.MutationRate, rng)
-			matrix, unplaced := DecodeChromosome(child, blocks, daySlots, cfg.PJOKSubjectID)
-			if unplaced > 0 {
-				beforeUnplaced := unplaced
-				mutateUnplaced(&child, blocks, candidateIndex, groups, matrix, rng)
-				matrix, unplaced = DecodeChromosome(child, blocks, daySlots, cfg.PJOKSubjectID)
-				mutateCalls++
-				mutateTotalBefore += beforeUnplaced
-				mutateTotalAfter += unplaced
-				if unplaced < beforeUnplaced {
-					mutateImproved++
-				}
+		for len(nextGen) < cfg.PopSize {
+			indukA := pickWinner(population, cfg.TournSize, acak)
+			indukB := pickWinner(population, cfg.TournSize, acak)
+			anak := ConstraintAwareCrossover(indukA.genome, indukB.genome, blocks, candidateIndex, indeksGrup, daySlots, cfg.PJOKSubjID, acak)
+			mutateAll(&anak, blocks, candidateIndex, indeksGrup, cfg.MutationProb, acak)
+			grid, missing := DecodeChromosome(anak, blocks, daySlots, cfg.PJOKSubjID)
+			if missing > 0 {
+				beforeMissing := missing
+				repairUnplaced(&anak, blocks, candidateIndex, indeksGrup, grid, acak)
+				grid, missing = DecodeChromosome(anak, blocks, daySlots, cfg.PJOKSubjID)
+				diag.record(beforeMissing, missing)
 			}
-			soft := CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
-			next = append(next, individual{chromosome: child, unplaced: unplaced, softViolations: soft})
+			penalty := CountSoftViolations(grid, blocks, cfg.PJOKSubjID)
+			nextGen = append(nextGen, candidate{genome: anak, unplaced: missing, softPenalty: penalty})
 		}
 
-		pop = next
-		sortPopulation(pop)
+		population = nextGen
+		rankPopulation(population)
 
-		if betterThan(pop[0], best) {
-			best = pop[0]
-			stagnantGens = 0
+		if dominates(population[0], bestSol) {
+			bestSol = population[0]
+			stagnant = 0
 		} else {
-			stagnantGens++
+			stagnant++
 		}
 
-		if cfg.StagnationLimit > 0 && stagnantGens >= cfg.StagnationLimit {
-			if cfg.ProgressEvery > 0 {
-				emit(gen)
+		if cfg.PatienceLimit > 0 && stagnant >= cfg.PatienceLimit {
+			if cfg.ReportInterval > 0 {
+				report(gen)
 				emittedLastGen = true
 			}
 			break
 		}
 
-		if cfg.ProgressEvery > 0 && gen%cfg.ProgressEvery == 0 {
-			emit(gen)
+		if cfg.ReportInterval > 0 && gen%cfg.ReportInterval == 0 {
+			report(gen)
 			emittedLastGen = true
 		} else {
 			emittedLastGen = false
@@ -159,134 +185,131 @@ func RunGA(
 	}
 
 	if !emittedLastGen {
-		emit(lastGen)
+		report(lastGen)
 	}
+	diag.print()
 
-	if mutateCalls > 0 {
-		avgBefore := float64(mutateTotalBefore) / float64(mutateCalls)
-		avgAfter := float64(mutateTotalAfter) / float64(mutateCalls)
-		fmt.Printf("[GA diag] mutateUnplaced: calls=%d improved=%d (%.1f%%) avgBefore=%.2f avgAfter=%.2f avgDelta=%.2f\n",
-			mutateCalls, mutateImproved,
-			float64(mutateImproved)/float64(mutateCalls)*100,
-			avgBefore, avgAfter, avgBefore-avgAfter)
-	}
-
-	matrix, unplaced := DecodeChromosome(best.chromosome, blocks, daySlots, cfg.PJOKSubjectID)
-	soft := CountSoftViolations(matrix, blocks, cfg.PJOKSubjectID)
+	finalGrid, finalUnplaced := DecodeChromosome(bestSol.genome, blocks, daySlots, cfg.PJOKSubjID)
+	finalPenalty := CountSoftViolations(finalGrid, blocks, cfg.PJOKSubjID)
 	return GAResult{
-		Chromosome:     best.chromosome,
-		Matrix:         matrix,
-		Unplaced:       unplaced,
-		SoftViolations: soft,
+		Chromosome:     bestSol.genome,
+		Matrix:         finalGrid,
+		Unplaced:       finalUnplaced,
+		SoftViolations: finalPenalty,
 		Generations:    lastGen,
 		Elapsed:        time.Since(start),
 	}
 }
 
-func initPopulation(
+// buildPopulation initialises the GA population using SmartChromosome for each member.
+func buildPopulation(
 	blocks []MatrixBlock,
 	candidateIndex map[uint][]Gene,
 	daySlots DaySlots,
 	size int,
-	pjokSubjectID uint,
+	pjokSubjID uint,
 	groups GroupIndex,
-	rng *rand.Rand,
-) []individual {
-	pop := make([]individual, size)
-	for i := range pop {
-		c := SmartChromosome(blocks, candidateIndex, groups, daySlots, pjokSubjectID, rng)
-		matrix, unplaced := DecodeChromosome(c, blocks, daySlots, pjokSubjectID)
-		soft := CountSoftViolations(matrix, blocks, pjokSubjectID)
-		pop[i] = individual{chromosome: c, unplaced: unplaced, softViolations: soft}
+	acak *rand.Rand,
+) []candidate {
+	result := make([]candidate, size)
+	for idx := 0; idx < size; idx++ {
+		sol := SmartChromosome(blocks, candidateIndex, groups, daySlots, pjokSubjID, acak)
+		grid, missing := DecodeChromosome(sol, blocks, daySlots, pjokSubjID)
+		penalty := CountSoftViolations(grid, blocks, pjokSubjID)
+		result[idx] = candidate{genome: sol, unplaced: missing, softPenalty: penalty}
 	}
-	return pop
+	return result
 }
 
-func tournamentSelect(pop []individual, k int, rng *rand.Rand) individual {
-	best := pop[rng.Intn(len(pop))]
-	for i := 1; i < k; i++ {
-		candidate := pop[rng.Intn(len(pop))]
-		if betterThan(candidate, best) {
-			best = candidate
+// pickWinner runs a k-way tournament and returns the fittest candidate.
+func pickWinner(population []candidate, k int, acak *rand.Rand) candidate {
+	winner := population[acak.Intn(len(population))]
+	for round := 1; round < k; round++ {
+		rival := population[acak.Intn(len(population))]
+		if dominates(rival, winner) {
+			winner = rival
 		}
 	}
-	return best
+	return winner
 }
 
-func applyMutation(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, rate float64, rng *rand.Rand) {
-	processed := make(map[string]bool)
-	for i, block := range blocks {
-		if block.GroupKey != nil {
-			if processed[*block.GroupKey] {
+// mutateAll applies random gene replacement across the chromosome at the given probability.
+// Group members are always mutated together to preserve synchronisation.
+func mutateAll(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, prob float64, acak *rand.Rand) {
+	visitedGroups := make(map[string]bool)
+	for idx, block := range blocks {
+		switch block.GroupKey != nil {
+		case true:
+			if visitedGroups[*block.GroupKey] {
 				continue
 			}
-			processed[*block.GroupKey] = true
-			if rng.Float64() < rate {
+			visitedGroups[*block.GroupKey] = true
+			if acak.Float64() < prob {
 				candidates := candidateIndex[block.ID]
 				if len(candidates) > 0 {
-					gene := candidates[rng.Intn(len(candidates))]
+					gene := candidates[acak.Intn(len(candidates))]
 					for _, j := range groups[*block.GroupKey] {
 						c.Set(j, gene)
 					}
 				}
 			}
-		} else {
-			if rng.Float64() < rate {
-				MutateGene(c, i, block, candidateIndex, rng)
+		default:
+			if acak.Float64() < prob {
+				MutateGene(c, idx, block, candidateIndex, acak)
 			}
 		}
 	}
 }
 
-// mutateUnplaced force-reassigns every block that failed to place in the decoded
-// matrix. Unplaced blocks have nothing to lose, so giving them a fresh random
-// candidate is always worth trying. Group members are reassigned together.
-func mutateUnplaced(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, matrix *ScheduleMatrix, rng *rand.Rand) {
-	processed := make(map[string]bool)
-	for i, block := range blocks {
+// repairUnplaced force-reassigns every block that failed to decode in the grid.
+// An unplaced block has no positional value to preserve, so any random candidate is acceptable.
+func repairUnplaced(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, grid *ScheduleMatrix, acak *rand.Rand) {
+	visitedGroups := make(map[string]bool)
+	for idx, block := range blocks {
 		if block.GroupKey != nil {
-			if processed[*block.GroupKey] {
+			if visitedGroups[*block.GroupKey] {
 				continue
 			}
-			processed[*block.GroupKey] = true
-			// Only reassign if any member of the group is unplaced.
-			anyUnplaced := false
+			visitedGroups[*block.GroupKey] = true
+			anyMissing := false
 			for _, j := range groups[*block.GroupKey] {
-				if _, ok := matrix.Placement(blocks[j].ID); !ok {
-					anyUnplaced = true
+				if _, ok := grid.Placement(blocks[j].ID); !ok {
+					anyMissing = true
 					break
 				}
 			}
-			if anyUnplaced {
+			if anyMissing {
 				candidates := candidateIndex[block.ID]
 				if len(candidates) > 0 {
-					gene := candidates[rng.Intn(len(candidates))]
+					gene := candidates[acak.Intn(len(candidates))]
 					for _, j := range groups[*block.GroupKey] {
 						c.Set(j, gene)
 					}
 				}
 			}
 		} else {
-			if _, placed := matrix.Placement(block.ID); !placed {
-				MutateGene(c, i, block, candidateIndex, rng)
+			if _, placed := grid.Placement(block.ID); !placed {
+				MutateGene(c, idx, block, candidateIndex, acak)
 			}
 		}
 	}
 }
 
-func sortPopulation(pop []individual) {
-	sort.Slice(pop, func(i, j int) bool {
-		return betterThan(pop[i], pop[j])
+// rankPopulation sorts the population ascending by (unplaced, softPenalty).
+func rankPopulation(population []candidate) {
+	sort.Slice(population, func(i, j int) bool {
+		return dominates(population[i], population[j])
 	})
 }
 
-func avgUnplaced(pop []individual) float64 {
-	if len(pop) == 0 {
+// meanUnplaced computes the average unplaced block count across the entire population.
+func meanUnplaced(population []candidate) float64 {
+	if len(population) == 0 {
 		return 0
 	}
 	total := 0
-	for _, ind := range pop {
-		total += ind.unplaced
+	for _, m := range population {
+		total += m.unplaced
 	}
-	return float64(total) / float64(len(pop))
+	return float64(total) / float64(len(population))
 }
