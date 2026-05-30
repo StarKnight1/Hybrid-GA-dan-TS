@@ -14,7 +14,13 @@ import (
 )
 
 func Run() {
-	config.DB.AutoMigrate(
+	db := config.DB
+	// Drop NOT NULL from legacy columns left by previous AutoMigrate runs.
+	// These are no-ops when the table or column does not exist yet.
+	db.Exec("ALTER TABLE IF EXISTS saved_schedules ALTER COLUMN entries DROP NOT NULL")
+	db.Exec("ALTER TABLE IF EXISTS saved_schedules ALTER COLUMN meta DROP NOT NULL")
+
+	db.AutoMigrate(
 		&classes.Class{},
 		&parents.Parent{},
 		&parents_students.ParentStudent{},

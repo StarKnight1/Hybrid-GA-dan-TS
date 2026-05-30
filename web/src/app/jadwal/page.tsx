@@ -40,9 +40,7 @@ export default function JadwalPage() {
     }
   }, [token]);
 
-  useEffect(() => {
-    loadList();
-  }, [loadList]);
+  useEffect(() => { loadList(); }, [loadList]);
 
   async function handleSelect(id: number) {
     if (selected?.id === id) return;
@@ -70,8 +68,9 @@ export default function JadwalPage() {
   }
 
   function handleExport(id: number, title: string) {
-    const url = scheduleExportUrl(id);
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(scheduleExportUrl(id), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then((r) => r.blob())
       .then((b) => {
         const a = document.createElement("a");
@@ -83,44 +82,49 @@ export default function JadwalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-50">
       <Nav />
 
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
 
-        {/* ── Schedule list ────────────────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CalendarDays className="h-5 w-5" />
+        {/* ── Schedule list ─────────────────────────────────────────────────── */}
+        <Card className="border-blue-100">
+          <CardHeader className="pb-3 border-b border-blue-50">
+            <CardTitle className="flex items-center gap-2 text-blue-800 text-base">
+              <CalendarDays className="h-5 w-5 text-blue-500" />
               Jadwal Tersimpan
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-4">
             {listLoading ? (
-              <div className="flex items-center gap-2 text-gray-400 py-6">
+              <div className="flex items-center gap-2 text-gray-400 py-8 justify-center">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 <span>Memuat...</span>
               </div>
             ) : list.length === 0 ? (
-              <div className="text-center py-8 text-gray-400">
-                <CalendarDays className="h-10 w-10 mx-auto mb-2 opacity-40" />
-                <p>Belum ada jadwal yang diterbitkan</p>
+              <div className="text-center py-10 text-gray-400">
+                <CalendarDays className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                <p className="font-medium">Belum ada jadwal yang diterbitkan</p>
+                <p className="text-xs mt-1">
+                  {isAdmin ? "Gunakan Dashboard untuk generate dan simpan jadwal." : "Admin belum menerbitkan jadwal."}
+                </p>
               </div>
             ) : (
               <div className="space-y-2">
                 {list.map((item) => (
                   <div
                     key={item.id}
-                    className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
+                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
                       selected?.id === item.id
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 bg-white hover:bg-gray-50"
+                        ? "border-blue-400 bg-blue-50 shadow-sm"
+                        : "border-gray-200 bg-white hover:bg-blue-50 hover:border-blue-200"
                     }`}
                     onClick={() => handleSelect(item.id)}
                   >
-                    <div className="space-y-0.5">
-                      <div className="font-medium text-sm">{item.title}</div>
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="font-semibold text-sm text-blue-900 truncate">
+                        {item.title}
+                      </div>
                       <div className="text-xs text-gray-400">
                         {new Date(item.createdAt).toLocaleDateString("id-ID", {
                           day: "numeric",
@@ -131,10 +135,14 @@ export default function JadwalPage() {
                         })}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <div
+                      className="flex items-center gap-1.5 shrink-0 ml-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <Button
                         size="sm"
                         variant="ghost"
+                        className="text-blue-500 hover:text-blue-700 hover:bg-blue-100 h-8 w-8 p-0"
                         onClick={() => handleExport(item.id, item.title)}
                         title="Download Excel"
                       >
@@ -144,7 +152,7 @@ export default function JadwalPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                          className="text-red-400 hover:text-red-600 hover:bg-red-50 h-8 w-8 p-0"
                           onClick={() => handleDelete(item.id, item.title)}
                           title="Hapus"
                         >
@@ -159,24 +167,37 @@ export default function JadwalPage() {
           </CardContent>
         </Card>
 
-        {/* ── Selected schedule ─────────────────────────────────────────────── */}
+        {/* Loading selected */}
         {selectedLoading && (
-          <div className="flex items-center gap-2 text-gray-400 py-4">
+          <div className="flex items-center gap-2 text-gray-400 py-4 justify-center">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span>Memuat jadwal...</span>
           </div>
         )}
 
+        {/* Selected schedule */}
         {selected && !selectedLoading && (
-          <Card>
-            <CardHeader>
+          <Card className="border-blue-100">
+            <CardHeader className="pb-3 border-b border-blue-50">
               <div className="flex items-center justify-between flex-wrap gap-3">
-                <CardTitle>{selected.title}</CardTitle>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline">{selected.entries.length} JP</Badge>
+                <div>
+                  <CardTitle className="text-blue-800 text-base">{selected.title}</CardTitle>
+                  {selected.meta?.result && (
+                    <div className="mt-2">
+                      <LogSummary meta={selected.meta} />
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge
+                    variant="outline"
+                    className="border-blue-200 text-blue-700 font-semibold"
+                  >
+                    {selected.entries.length} JP
+                  </Badge>
                   <Button
                     size="sm"
-                    variant="outline"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
                     onClick={() => handleExport(selected.id, selected.title)}
                   >
                     <Download className="h-4 w-4 mr-1.5" />
@@ -184,13 +205,8 @@ export default function JadwalPage() {
                   </Button>
                 </div>
               </div>
-              {selected.meta?.result && (
-                <div className="mt-2">
-                  <LogSummary meta={selected.meta} />
-                </div>
-              )}
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               <ScheduleTable entries={selected.entries} />
             </CardContent>
           </Card>

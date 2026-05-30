@@ -10,8 +10,8 @@ type SavedSchedule struct {
 	ID uint `gorm:"primaryKey;autoIncrement"`
 
 	Title   string `gorm:"not null"`
-	Entries string `gorm:"type:text;not null"` // JSON array of ScheduleEntry
-	Meta    string `gorm:"type:text"`          // JSON ScheduleMeta
+	Entries string `gorm:"column:entries_json;type:text;not null"` // JSON array of ScheduleEntry
+	Meta    string `gorm:"column:meta_json;type:text"`             // JSON ScheduleMeta
 
 	CreatedAt time.Time
 	CreatedBy string

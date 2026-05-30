@@ -37,50 +37,133 @@ func DownloadTemplateHandler(c *gin.Context) {
 func buildTemplate() *excelize.File {
 	f := excelize.NewFile()
 
+	// ── Common styles ─────────────────────────────────────────────────────────
+	thinBorder := []excelize.Border{
+		{Type: "left", Color: "CCCCCC", Style: 1},
+		{Type: "right", Color: "CCCCCC", Style: 1},
+		{Type: "top", Color: "CCCCCC", Style: 1},
+		{Type: "bottom", Color: "CCCCCC", Style: 1},
+	}
+	hdrStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true, Color: "FFFFFF", Size: 11},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"1F538D"}, Pattern: 1},
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
+		Border: []excelize.Border{
+			{Type: "left", Color: "1F538D", Style: 1},
+			{Type: "right", Color: "1F538D", Style: 1},
+			{Type: "top", Color: "1F538D", Style: 1},
+			{Type: "bottom", Color: "1F538D", Style: 1},
+		},
+	})
+	dataStyle, _ := f.NewStyle(&excelize.Style{
+		Border:    thinBorder,
+		Alignment: &excelize.Alignment{Vertical: "center"},
+	})
+	altStyle, _ := f.NewStyle(&excelize.Style{
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"EEF4FF"}, Pattern: 1},
+		Border:    thinBorder,
+		Alignment: &excelize.Alignment{Vertical: "center"},
+	})
+	noteStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true, Color: "1F538D", Size: 14},
+	})
+	bodyStyle, _ := f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Size: 11},
+		Alignment: &excelize.Alignment{WrapText: true},
+	})
+	warnStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Italic: true, Color: "FF8C00", Size: 10},
+	})
+
+	applyTable := func(sheet string, hdrEnd string, dataRows int, cols int) {
+		f.SetCellStyle(sheet, "A1", hdrEnd, hdrStyle)
+		f.SetRowHeight(sheet, 1, 28)
+		for r := 2; r <= dataRows+1; r++ {
+			last, _ := excelize.CoordinatesToCellName(cols, r)
+			if r%2 == 0 {
+				f.SetCellStyle(sheet, cellName(1, r), last, altStyle)
+			} else {
+				f.SetCellStyle(sheet, cellName(1, r), last, dataStyle)
+			}
+			f.SetRowHeight(sheet, r, 20)
+		}
+	}
+
 	// ── Sheet: Petunjuk ──────────────────────────────────────────────────────
 	instrSheet := "Petunjuk"
 	f.SetSheetName("Sheet1", instrSheet)
-	instrs := []string{
-		"PETUNJUK PENGISIAN DATA JADWAL",
-		"",
-		"1. Sheet 'Guru'   : Isi data guru (nomor, nama, jenis kelamin).",
-		"2. Sheet 'Kelas'  : Isi nama kelas dan status aktif.",
-		"3. Sheet 'Penugasan' : Isi penugasan mengajar per kelas.",
-		"",
-		"Catatan:",
-		"- Kolom 'No' diisi otomatis, tidak perlu diisi.",
-		"- Jenis Kelamin: L (Laki-laki) atau P (Perempuan).",
-		"- Aktif (Kelas): Ya atau Tidak.",
-		"- Nomor Guru pada Penugasan harus sesuai dengan sheet Guru.",
-		"- Untuk mata pelajaran SBP (Seni Budaya Paralel), kosongkan Nomor Guru",
-		"  dan isi Group Key (contoh: SBP-7-ABC).",
-		"- Group Key diisi hanya untuk kelas yang dijadwalkan bersamaan (paralel).",
+	f.SetColWidth(instrSheet, "A", "A", 70)
+
+	f.SetCellValue(instrSheet, "A1", "PETUNJUK PENGISIAN DATA JADWAL — SMP Mater Dei")
+	f.SetCellStyle(instrSheet, "A1", "A1", noteStyle)
+	f.SetRowHeight(instrSheet, 1, 28)
+
+	lines := []struct {
+		row  int
+		text string
+		warn bool
+	}{
+		{3, "LANGKAH PENGISIAN:", false},
+		{4, "1. Sheet \"Guru\"      : Isi data setiap guru (nomor unik, nama lengkap, jenis kelamin).", false},
+		{5, "2. Sheet \"Kelas\"     : Isi nama kelas dan status aktif (Ya/Tidak).", false},
+		{6, "3. Sheet \"Penugasan\": Isi penugasan mengajar — satu baris = satu guru × satu kelas × satu mata pelajaran.", false},
+		{7, "4. Upload file ini melalui tombol \"Upload Data Excel\" di halaman Dashboard.", false},
+		{9, "ATURAN PENTING:", false},
+		{10, "• Kolom \"No\" bisa dibiarkan kosong — sistem mengisi otomatis.", false},
+		{11, "• Jenis Kelamin diisi: L (Laki-laki) atau P (Perempuan).", false},
+		{12, "• Aktif (Kelas) diisi: Ya atau Tidak. Kelas \"Tidak\" tidak akan dijadwalkan.", false},
+		{13, "• Nomor Guru pada sheet Penugasan HARUS sesuai dengan sheet Guru.", false},
+		{14, "• JP Per Minggu = jumlah jam pelajaran per minggu (misal: 3).", false},
+		{16, "MATA PELAJARAN PARALEL (SBP / Seni Budaya Paralel):", false},
+		{17, "• Kosongkan kolom Nomor Guru untuk kelas SBP.", false},
+		{18, "• Isi Group Key yang sama untuk semua kelas yang dijadwalkan paralel.", false},
+		{19, "• Contoh Group Key: \"SBP-7-ABC\" untuk kelas 7A, 7B, 7C.", false},
+		{20, "⚠  Jangan mengubah nama sheet atau menghapus baris header!", true},
 	}
-	for i, line := range instrs {
-		f.SetCellValue(instrSheet, cellName(1, i+1), line)
+	for _, l := range lines {
+		f.SetCellValue(instrSheet, cellName(1, l.row), l.text)
+		if l.warn {
+			f.SetCellStyle(instrSheet, cellName(1, l.row), cellName(1, l.row), warnStyle)
+		} else if l.row == 3 || l.row == 9 || l.row == 16 {
+			f.SetCellStyle(instrSheet, cellName(1, l.row), cellName(1, l.row), hdrStyle)
+			f.SetRowHeight(instrSheet, l.row, 22)
+		} else {
+			f.SetCellStyle(instrSheet, cellName(1, l.row), cellName(1, l.row), bodyStyle)
+		}
 	}
+	_ = bodyStyle
 
 	// ── Sheet: Guru ───────────────────────────────────────────────────────────
 	guruSheet := "Guru"
 	f.NewSheet(guruSheet)
+	f.SetColWidth(guruSheet, "A", "A", 6)
+	f.SetColWidth(guruSheet, "B", "B", 14)
+	f.SetColWidth(guruSheet, "C", "C", 38)
+	f.SetColWidth(guruSheet, "D", "D", 20)
+
 	guruHeaders := []string{"No", "Nomor Guru", "Nama Guru", "Jenis Kelamin (L/P)"}
 	for col, h := range guruHeaders {
 		f.SetCellValue(guruSheet, cellName(col+1, 1), h)
 	}
-	// sample rows
 	samples := [][]interface{}{
 		{1, 1, "Margareta Kamsiati, S.Pd", "P"},
 		{2, 2, "Drs. Antonius Sarjiyono", "L"},
+		{3, 3, "Agustinus Tukiman, S.Pd", "L"},
 	}
 	for i, row := range samples {
 		for col, val := range row {
 			f.SetCellValue(guruSheet, cellName(col+1, i+2), val)
 		}
 	}
+	applyTable(guruSheet, "D1", len(samples), 4)
 
 	// ── Sheet: Kelas ──────────────────────────────────────────────────────────
 	kelasSheet := "Kelas"
 	f.NewSheet(kelasSheet)
+	f.SetColWidth(kelasSheet, "A", "A", 6)
+	f.SetColWidth(kelasSheet, "B", "B", 18)
+	f.SetColWidth(kelasSheet, "C", "C", 18)
+
 	kelasHeaders := []string{"No", "Nama Kelas", "Aktif (Ya/Tidak)"}
 	for col, h := range kelasHeaders {
 		f.SetCellValue(kelasSheet, cellName(col+1, 1), h)
@@ -98,10 +181,18 @@ func buildTemplate() *excelize.File {
 			f.SetCellValue(kelasSheet, cellName(col+1, i+2), val)
 		}
 	}
+	applyTable(kelasSheet, "C1", len(kelasData), 3)
 
 	// ── Sheet: Penugasan ──────────────────────────────────────────────────────
 	tugasSheet := "Penugasan"
 	f.NewSheet(tugasSheet)
+	f.SetColWidth(tugasSheet, "A", "A", 6)
+	f.SetColWidth(tugasSheet, "B", "B", 14)
+	f.SetColWidth(tugasSheet, "C", "C", 28)
+	f.SetColWidth(tugasSheet, "D", "D", 14)
+	f.SetColWidth(tugasSheet, "E", "E", 16)
+	f.SetColWidth(tugasSheet, "F", "F", 26)
+
 	tugasHeaders := []string{"No", "Nomor Guru", "Mata Pelajaran", "Nama Kelas", "JP Per Minggu", "Group Key (Opsional)"}
 	for col, h := range tugasHeaders {
 		f.SetCellValue(tugasSheet, cellName(col+1, 1), h)
@@ -110,15 +201,17 @@ func buildTemplate() *excelize.File {
 		{1, 1, "Pancasila", "7D", 3, ""},
 		{2, 1, "Pancasila", "8A", 3, ""},
 		{3, 2, "IPA", "8A", 3, ""},
-		{4, "", "Seni Budaya", "7A", 3, "SBP-7-ABC"},
-		{5, "", "Seni Budaya", "7B", 3, "SBP-7-ABC"},
-		{6, "", "Seni Budaya", "7C", 3, "SBP-7-ABC"},
+		{4, 3, "Matematika", "7A", 4, ""},
+		{5, "", "Seni Budaya", "7A", 3, "SBP-7-ABC"},
+		{6, "", "Seni Budaya", "7B", 3, "SBP-7-ABC"},
+		{7, "", "Seni Budaya", "7C", 3, "SBP-7-ABC"},
 	}
 	for i, row := range tugasData {
 		for col, val := range row {
 			f.SetCellValue(tugasSheet, cellName(col+1, i+2), val)
 		}
 	}
+	applyTable(tugasSheet, "F1", len(tugasData), 6)
 
 	idx, _ := f.GetSheetIndex(instrSheet)
 	f.SetActiveSheet(idx)
