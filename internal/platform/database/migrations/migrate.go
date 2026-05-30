@@ -5,6 +5,7 @@ import (
 	"smp_mater_dei_be/internal/parents"
 	"smp_mater_dei_be/internal/parents_students"
 	"smp_mater_dei_be/internal/platform/config"
+	savedschedules "smp_mater_dei_be/internal/saved_schedules"
 	"smp_mater_dei_be/internal/students"
 	"smp_mater_dei_be/internal/subjects"
 	"smp_mater_dei_be/internal/teachers"
@@ -22,5 +23,6 @@ func Run() {
 		&teachers.Teacher{},
 		&users.User{},
 		&teachingassignments.TeachingAssignment{},
+		&savedschedules.SavedSchedule{},
 	)
 }

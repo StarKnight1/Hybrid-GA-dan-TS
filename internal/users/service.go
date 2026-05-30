@@ -14,19 +14,20 @@ import (
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
 
-func Login(identifier, password string) (string, error) {
+func Login(identifier, password string) (string, string, error) {
 	user, err := GetUserByIdentifier(identifier)
 	logging.Logger.Info("login_attempt", zap.Any("user", user), zap.Error(err))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if !security.CheckPassword(user.PasswordHash, password) {
 		logging.Logger.Info("login_failed", zap.String("identifier", identifier))
-		return "", ErrInvalidCredentials
+		return "", "", ErrInvalidCredentials
 	}
 
-	return GenerateToken(user.ID)
+	token, err := GenerateToken(user.ID, user.Role)
+	return token, user.Role, err
 }
 
 func GetProfile(userID string) (any, error) {
@@ -36,46 +37,32 @@ func GetProfile(userID string) (any, error) {
 	}
 
 	switch user.Role {
+	case "admin":
+		return dto.ProfileResponse{Username: "Administrator", Role: user.Role}, nil
+
 	case "student":
 		student, err := students.GetStudentByUserID(userID)
 		if err != nil {
-			return nil, err
+			return dto.ProfileResponse{Username: user.LoginIdentifier, Role: user.Role}, nil
 		}
-
-		studentResponse := dto.ProfileResponse{
-			Username: student.FullName,
-		}
-
-		return studentResponse, nil
+		return dto.ProfileResponse{Username: student.FullName, Role: user.Role}, nil
 
 	case "parent":
-		// Handle parent role
 		parent, err := parents.GetParentByUserID(userID)
 		if err != nil {
-			return nil, err
+			return dto.ProfileResponse{Username: user.LoginIdentifier, Role: user.Role}, nil
 		}
-
-		parentResponse := dto.ProfileResponse{
-			Username: parent.FullName,
-		}
-
-		return parentResponse, nil
+		return dto.ProfileResponse{Username: parent.FullName, Role: user.Role}, nil
 
 	case "teacher":
-		// Handle teacher role
 		teacher, err := teachers.GetTeacherByUserID(userID)
 		if err != nil {
-			return nil, err
+			return dto.ProfileResponse{Username: user.LoginIdentifier, Role: user.Role}, nil
 		}
-
-		teacherResponse := dto.ProfileResponse{
-			Username: teacher.FullName,
-		}
-
-		return teacherResponse, nil
+		return dto.ProfileResponse{Username: teacher.FullName, Role: user.Role}, nil
 
 	default:
 		logging.Logger.Warn("unknown_role", zap.String("userID", userID), zap.String("role", user.Role))
-		return nil, errors.New("unknown role")
+		return dto.ProfileResponse{Username: user.LoginIdentifier, Role: user.Role}, nil
 	}
 }

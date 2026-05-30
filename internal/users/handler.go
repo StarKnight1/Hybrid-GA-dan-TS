@@ -15,13 +15,13 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	token, err := Login(req.Identifier, req.Password)
+	token, role, err := Login(req.Identifier, req.Password)
 	if err != nil {
 		response.Fail(c, http.StatusUnauthorized, "invalid credentials", err.Error())
 		return
 	}
 
-	response.OK(c, gin.H{"token": token}, "login successful")
+	response.OK(c, gin.H{"token": token, "role": role}, "login successful")
 }
 
 func GetProfileHandler(c *gin.Context) {
