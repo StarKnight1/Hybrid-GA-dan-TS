@@ -29,7 +29,7 @@ func Delete(id uint) error {
 	return config.DB.Delete(&SavedSchedule{}, id).Error
 }
 
-// Activate sets this schedule as the only active (deployed) one.
+// Activate mengaktifkan jadwal ini dan menonaktifkan semua jadwal lain.
 func Activate(id uint) error {
 	return config.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&SavedSchedule{}).Where("id > ?", 0).Update("is_active", false).Error; err != nil {
@@ -39,7 +39,7 @@ func Activate(id uint) error {
 	})
 }
 
-// GetActive returns the currently deployed schedule, if any.
+// GetActive mengambil jadwal yang sedang aktif/diterbitkan.
 func GetActive() (*SavedSchedule, error) {
 	var s SavedSchedule
 	err := config.DB.Where("is_active = ?", true).First(&s).Error

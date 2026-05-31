@@ -1,7 +1,6 @@
 package schedule
 
-// ScheduleEntry is one generated 1-JP timetable row.
-// One JP is always 40 minutes.
+// ScheduleEntry adalah satu baris jadwal hasil generate sebesar 1 JP (40 menit).
 type ScheduleEntry struct {
 	TeacherID   *uint  `json:"teacherId,omitempty"`
 	SubjectID   uint   `json:"subjectId"`
@@ -14,7 +13,7 @@ type ScheduleEntry struct {
 	TimeEnd     string `json:"timeEnd"`
 }
 
-// GAParams contains tunable parameters for schedule generation.
+// GAParams menyimpan parameter yang dapat diatur untuk generate jadwal.
 type GAParams struct {
 	PopulationSize int     `json:"populationSize"`
 	Generations    int     `json:"generations"`
@@ -26,24 +25,24 @@ type GAParams struct {
 	ProgressEvery  int     `json:"progressEvery"`
 }
 
-// GABreakdown mirrors hard-constraint breakdown counters.
+// GABreakdown mencerminkan penghitung rincian kendala keras.
 type GABreakdown struct {
 	ClassConflicts    int `json:"classConflicts"`
 	TeacherConflicts  int `json:"teacherConflicts"`
 	SiblingViolations int `json:"siblingViolations"`
 }
 
-// SoftBreakdown breaks down soft violations by category.
-// SameDaySplit: blocks of the same (class, subject) placed on the same day (weight 1 each).
-// SameDaySplitGrouped: subset of SameDaySplit where at least one block is an SBP parallel group member.
-// PJOKAfterDeadline: PJOK 2JP blocks ending after 10:50 (weight 3 each in total score).
+// SoftBreakdown merinci pelanggaran ringan per kategori.
+// SameDaySplit: blok (kelas, mapel) yang sama ditempatkan pada hari yang sama (bobot 1 masing-masing).
+// SameDaySplitGrouped: subset SameDaySplit yang melibatkan anggota grup paralel SBP.
+// PJOKAfterDeadline: blok PJOK 2JP yang selesai setelah 10:50 (bobot 3 masing-masing dalam total skor).
 type SoftBreakdown struct {
 	SameDaySplit        int `json:"sameDaySplit"`
 	SameDaySplitGrouped int `json:"sameDaySplitGrouped"`
 	PJOKAfterDeadline   int `json:"pjokAfterDeadline"`
 }
 
-// GAProgressSnapshot is one observable progress point emitted during GA execution.
+// GAProgressSnapshot adalah satu titik progres yang dapat diamati selama eksekusi GA.
 type GAProgressSnapshot struct {
 	Generation           int         `json:"generation"`
 	TotalGenerations     int         `json:"totalGenerations"`
@@ -63,7 +62,7 @@ type GAProgressSnapshot struct {
 	Breakdown            GABreakdown `json:"breakdown"`
 }
 
-// InputStats describes the input domain size consumed by the scheduler.
+// InputStats mendeskripsikan ukuran domain input yang digunakan oleh penjadwal.
 type InputStats struct {
 	ActiveAssignments int `json:"activeAssignments"`
 	Blocks            int `json:"-"`
@@ -72,7 +71,7 @@ type InputStats struct {
 	Teachers          int `json:"teachers"`
 }
 
-// ResultStats describes the final optimization result quality.
+// ResultStats mendeskripsikan kualitas hasil optimasi akhir.
 type ResultStats struct {
 	EntriesGenerated int           `json:"entriesGenerated"`
 	BestFitness      int           `json:"-"`
@@ -82,7 +81,7 @@ type ResultStats struct {
 	SoftBreakdown    SoftBreakdown `json:"softBreakdown"`
 }
 
-// ScheduleMeta contains diagnostics and tuning context.
+// ScheduleMeta menyimpan diagnostik dan konteks penyetelan.
 type ScheduleMeta struct {
 	Input               InputStats  `json:"input"`
 	DefaultGA           GAParams    `json:"-"`
@@ -96,14 +95,14 @@ type ScheduleMeta struct {
 	SeedWarnings        []string    `json:"seedWarnings,omitempty"`
 }
 
-// ScheduleGenerationResult is the full payload returned by the API.
+// ScheduleGenerationResult adalah payload lengkap yang dikembalikan oleh API.
 type ScheduleGenerationResult struct {
 	Entries  []ScheduleEntry      `json:"entries"`
 	Meta     ScheduleMeta         `json:"meta"`
 	Progress []GAProgressSnapshot `json:"progress,omitempty"`
 }
 
-// GAParameterSpec documents one tunable GA parameter.
+// GAParameterSpec mendokumentasikan satu parameter GA yang dapat diatur.
 type GAParameterSpec struct {
 	Name        string `json:"name"`
 	Type        string `json:"type"`
@@ -113,7 +112,7 @@ type GAParameterSpec struct {
 	Description string `json:"description"`
 }
 
-// TSParams contains tunable parameters for the TS phase of the hybrid.
+// TSParams menyimpan parameter yang dapat diatur untuk fase TS pada hybrid.
 type TSParams struct {
 	TabuTenure    int   `json:"tabuTenure"`
 	Iterations    int   `json:"iterations"`
@@ -123,9 +122,9 @@ type TSParams struct {
 	PerturbAfter  int   `json:"perturbAfter"`
 }
 
-// TSProgressSnapshot is one observable progress point emitted during TS execution.
+// TSProgressSnapshot adalah satu titik progres yang dapat diamati selama eksekusi TS.
 type TSProgressSnapshot struct {
-	Phase                 string  `json:"phase"` // always "ts"
+	Phase                 string  `json:"phase"` // selalu "ts"
 	Iteration             int     `json:"iteration"`
 	TotalIterations       int     `json:"totalIterations"`
 	ProgressPercent       float64 `json:"progressPercent"`
@@ -137,16 +136,16 @@ type TSProgressSnapshot struct {
 	ElapsedMs             int64   `json:"elapsedMs"`
 }
 
-// GAPhaseResult carries a summary of what GA achieved, emitted as a phase_change event
-// so the client knows SA is starting and what GA's final state was.
+// GAPhaseResult membawa ringkasan hasil GA, dikirim sebagai event phase_change
+// sehingga klien mengetahui TS akan dimulai dan kondisi akhir GA.
 type GAPhaseResult struct {
-	Unplaced       int `json:"unplaced"`
-	SoftViolations int `json:"softViolations"`
-	Generations    int `json:"generations"`
+	Unplaced       int   `json:"unplaced"`
+	SoftViolations int   `json:"softViolations"`
+	Generations    int   `json:"generations"`
 	ElapsedMs      int64 `json:"elapsedMs"`
 }
 
-// ReadableScheduleEntry is one timetable row with human-readable names instead of UUIDs.
+// ReadableScheduleEntry adalah satu baris jadwal dengan nama yang mudah dibaca manusia.
 type ReadableScheduleEntry struct {
 	ClassName   string `json:"className"`
 	SubjectName string `json:"subjectName"`
@@ -156,35 +155,35 @@ type ReadableScheduleEntry struct {
 	TimeEnd     string `json:"timeEnd"`
 }
 
-// ReadableScheduleResult is the human-readable response from the v3/readable endpoint.
+// ReadableScheduleResult adalah respons yang mudah dibaca dari endpoint v3/readable.
 type ReadableScheduleResult struct {
 	Entries []ReadableScheduleEntry `json:"entries"`
 	Meta    ScheduleMeta            `json:"meta"`
 }
 
-// RunSummary is the metadata for one run inside a multi-run batch.
+// RunSummary adalah metadata untuk satu run dalam batch multi-run.
 type RunSummary struct {
 	Run  int          `json:"run"`
 	Meta ScheduleMeta `json:"meta"`
 }
 
-// MultiRunResult is the response from the v3/multi-run endpoint.
-// Contains only metadata per run — no schedule entries.
+// MultiRunResult adalah respons dari endpoint v3/multi-run.
+// Hanya berisi metadata per run — tanpa entri jadwal.
 type MultiRunResult struct {
 	Runs           int          `json:"runs"`
 	TotalElapsedMs int64        `json:"totalElapsedMs"`
 	Results        []RunSummary `json:"results"`
 }
 
-// GenerateHybridOptions carries options for the v3 hybrid GA+TS endpoint.
+// GenerateHybridOptions membawa opsi untuk endpoint hybrid GA+TS v3.
 type GenerateHybridOptions struct {
 	GA                GAParams
 	TS                TSParams
-	StagnationLimit   int  // GA stops after this many generations without improvement; 0 = disabled
-	Restarts          int  // additional full GA+TS runs; 0 = single run
-	LoopUntilFeasible bool // keep retrying until unplaced == 0; ignores Restarts limit
-	MaxLoops          int  // max attempts when LoopUntilFeasible=true; 0 = 1000
+	StagnationLimit   int  // GA berhenti setelah N generasi tanpa peningkatan; 0 = nonaktif
+	Restarts          int  // jumlah run GA+TS tambahan; 0 = satu run saja
+	LoopUntilFeasible bool // terus mencoba sampai unplaced == 0; mengabaikan batas Restarts
+	MaxLoops          int  // maks percobaan saat LoopUntilFeasible=true; 0 = 1000
 	OnGAProgress      func(GAProgressSnapshot)
-	OnGAComplete      func(GAPhaseResult) // fires when GA finishes, before TS starts
+	OnGAComplete      func(GAPhaseResult) // dipanggil saat GA selesai, sebelum TS dimulai
 	OnTSProgress      func(TSProgressSnapshot)
 }

@@ -1,13 +1,14 @@
 package algorithm
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sort"
 	"time"
 )
 
-// GAConfig contains tunable parameters for the genetic algorithm.
+// GAConfig menyimpan parameter yang dapat diatur untuk algoritma genetika.
 type GAConfig struct {
 	PopSize        int
 	MaxGenerations int
@@ -16,12 +17,12 @@ type GAConfig struct {
 	TournSize      int
 	RandSeed       int64
 	ReportInterval int
-	PatienceLimit  int // stop early when best hasn't improved for this many generations; 0 = disabled
+	PatienceLimit  int // berhenti lebih awal jika best tidak meningkat selama N generasi; 0 = nonaktif
 	OnSnapshot     func(GAProgress)
 	PJOKSubjID     uint
 }
 
-// GAProgress carries per-generation metrics emitted via OnSnapshot.
+// GAProgress membawa metrik per-generasi yang dikirim melalui OnSnapshot.
 type GAProgress struct {
 	Generation         int
 	BestUnplaced       int
@@ -31,7 +32,7 @@ type GAProgress struct {
 	Elapsed            time.Duration
 }
 
-// GAResult holds the best solution found by RunGA.
+// GAResult menyimpan solusi terbaik yang ditemukan oleh RunGA.
 type GAResult struct {
 	Chromosome     Chromosome
 	Matrix         *ScheduleMatrix
@@ -41,7 +42,7 @@ type GAResult struct {
 	Elapsed        time.Duration
 }
 
-// DefaultGAConfig returns sensible defaults suitable for most school scheduling instances.
+// DefaultGAConfig mengembalikan nilai default yang wajar untuk sebagian besar kasus penjadwalan sekolah.
 func DefaultGAConfig() GAConfig {
 	return GAConfig{
 		PopSize:        100,
@@ -54,15 +55,15 @@ func DefaultGAConfig() GAConfig {
 	}
 }
 
-// candidate is one member of the GA population with its decoded fitness.
+// candidate adalah satu anggota populasi GA beserta nilai fitness hasil decode.
 type candidate struct {
 	genome      Chromosome
 	unplaced    int
 	softPenalty int
 }
 
-// dominates returns true when a is strictly better than b.
-// Unplaced count is minimised first, then soft penalty.
+// dominates mengembalikan true jika a lebih baik dari b.
+// Jumlah unplaced diminimalkan terlebih dahulu, lalu penalti ringan.
 func dominates(a, b candidate) bool {
 	if a.unplaced != b.unplaced {
 		return a.unplaced < b.unplaced
@@ -70,7 +71,7 @@ func dominates(a, b candidate) bool {
 	return a.softPenalty < b.softPenalty
 }
 
-// mutDiag accumulates diagnostic counters for the repairUnplaced step.
+// mutDiag mengakumulasi penghitung diagnostik untuk langkah repairUnplaced.
 type mutDiag struct {
 	calls, hits, sumBefore, sumAfter int
 }
@@ -96,9 +97,10 @@ func (d *mutDiag) print() {
 		avgBefore, avgAfter, avgBefore-avgAfter)
 }
 
-// RunGA executes the genetic algorithm and returns the best chromosome found.
-// A result with Unplaced == 0 is a fully feasible schedule.
+// RunGA menjalankan algoritma genetika dan mengembalikan kromosom terbaik yang ditemukan.
+// Hasil dengan Unplaced == 0 adalah jadwal yang sepenuhnya layak.
 func RunGA(
+	ctx context.Context,
 	blocks []MatrixBlock,
 	candidateIndex map[uint][]Gene,
 	daySlots DaySlots,
@@ -132,6 +134,9 @@ func RunGA(
 	emittedLastGen := false
 
 	for gen := 1; gen <= cfg.MaxGenerations; gen++ {
+		if ctx.Err() != nil {
+			break
+		}
 		if bestSol.unplaced == 0 && bestSol.softPenalty == 0 {
 			break
 		}
@@ -201,7 +206,7 @@ func RunGA(
 	}
 }
 
-// buildPopulation initialises the GA population using SmartChromosome for each member.
+// buildPopulation menginisialisasi populasi GA menggunakan SmartChromosome untuk setiap anggota.
 func buildPopulation(
 	blocks []MatrixBlock,
 	candidateIndex map[uint][]Gene,
@@ -221,7 +226,7 @@ func buildPopulation(
 	return result
 }
 
-// pickWinner runs a k-way tournament and returns the fittest candidate.
+// pickWinner menjalankan turnamen k-arah dan mengembalikan kandidat terbaik.
 func pickWinner(population []candidate, k int, acak *rand.Rand) candidate {
 	winner := population[acak.Intn(len(population))]
 	for round := 1; round < k; round++ {
@@ -233,8 +238,8 @@ func pickWinner(population []candidate, k int, acak *rand.Rand) candidate {
 	return winner
 }
 
-// mutateAll applies random gene replacement across the chromosome at the given probability.
-// Group members are always mutated together to preserve synchronisation.
+// mutateAll menerapkan penggantian gen acak pada kromosom dengan probabilitas tertentu.
+// Anggota grup selalu dimutasi bersama untuk menjaga sinkronisasi.
 func mutateAll(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, prob float64, acak *rand.Rand) {
 	visitedGroups := make(map[string]bool)
 	for idx, block := range blocks {
@@ -261,8 +266,9 @@ func mutateAll(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint][]Ge
 	}
 }
 
-// repairUnplaced force-reassigns every block that failed to decode in the grid.
-// An unplaced block has no positional value to preserve, so any random candidate is acceptable.
+// repairUnplaced memaksa penugasan ulang setiap blok yang gagal di-decode pada grid.
+// Blok yang belum ditempatkan tidak memiliki posisi yang perlu dipertahankan,
+// sehingga kandidat acak mana pun dapat diterima.
 func repairUnplaced(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, grid *ScheduleMatrix, acak *rand.Rand) {
 	visitedGroups := make(map[string]bool)
 	for idx, block := range blocks {
@@ -295,14 +301,14 @@ func repairUnplaced(c *Chromosome, blocks []MatrixBlock, candidateIndex map[uint
 	}
 }
 
-// rankPopulation sorts the population ascending by (unplaced, softPenalty).
+// rankPopulation mengurutkan populasi secara menaik berdasarkan (unplaced, softPenalty).
 func rankPopulation(population []candidate) {
 	sort.Slice(population, func(i, j int) bool {
 		return dominates(population[i], population[j])
 	})
 }
 
-// meanUnplaced computes the average unplaced block count across the entire population.
+// meanUnplaced menghitung rata-rata jumlah blok unplaced di seluruh populasi.
 func meanUnplaced(population []candidate) float64 {
 	if len(population) == 0 {
 		return 0

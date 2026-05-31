@@ -19,6 +19,12 @@ import (
 )
 
 func SeedTemp(db *gorm.DB) error {
+	// Hapus permanen record soft-deleted agar unique constraint tidak menghalangi insert ulang.
+	db.Unscoped().Where("deleted_at IS NOT NULL").Delete(&teachingassignments.TeachingAssignment{})
+	db.Unscoped().Where("deleted_at IS NOT NULL").Delete(&subjects.Subject{})
+	db.Unscoped().Where("deleted_at IS NOT NULL").Delete(&classes.Class{})
+	db.Unscoped().Where("deleted_at IS NOT NULL").Delete(&teachers.Teacher{})
+
 	err := db.Transaction(func(tx *gorm.DB) error {
 		if err := seedTeachers(tx); err != nil {
 			return err
@@ -91,7 +97,7 @@ func seedDefaultUsers(db *gorm.DB) error {
 		return fmt.Errorf("seed sample student profile: %w", err)
 	}
 
-	// Assign student to class 7A if not yet set
+	// Hubungkan siswa ke kelas 7A jika belum ada
 	if studentProfile.ClassID == nil {
 		var class7A classes.Class
 		if err := db.Where("name = ?", "7A").First(&class7A).Error; err == nil {
@@ -101,7 +107,7 @@ func seedDefaultUsers(db *gorm.DB) error {
 		}
 	}
 
-	// Seed dummy teacher user linked to teacher #1 (Margareta Kamsiati)
+	// Akun guru contoh, terhubung ke data guru nomor 1
 	teacherUser := users.User{}
 	err = db.Where(&users.User{LoginIdentifier: "teacher1"}).
 		Attrs(users.User{
@@ -114,7 +120,7 @@ func seedDefaultUsers(db *gorm.DB) error {
 		return fmt.Errorf("seed sample teacher user: %w", err)
 	}
 
-	// Link teacher user to teacher record #1
+	// Hubungkan akun ke data guru
 	if teacherUser.ID > 0 {
 		db.Model(&teachers.Teacher{}).
 			Where("teacher_number = ? AND (user_id IS NULL OR user_id = ?)", 1, teacherUser.ID).
@@ -293,7 +299,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 	}
 
 	type assignment struct {
-		TeacherNumber string // empty string for SBP
+		TeacherNumber string
 		SubjectName   string
 		ClassName     string
 		JP            int
@@ -302,7 +308,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 
 	assignments := []assignment{
 
-		// ── TEACHER 1 ─ Pancasila ────────────────────────────────────────────
+		// Guru 1 – Pancasila
 		{"1", "Pancasila", "7D", 3, ""},
 		{"1", "Pancasila", "8A", 3, ""},
 		{"1", "Pancasila", "8B", 3, ""},
@@ -311,7 +317,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"1", "Pancasila", "8E", 3, ""},
 		{"1", "Pancasila", "8F", 3, ""},
 
-		// ── TEACHER 2 ─ IPA ──────────────────────────────────────────────────
+		// Guru 2 – IPA
 		{"2", "IPA", "8A", 3, ""},
 		{"2", "IPA", "8B", 3, ""},
 		{"2", "IPA", "8C", 3, ""},
@@ -319,7 +325,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"2", "IPA", "8E", 3, ""},
 		{"2", "IPA", "8F", 3, ""},
 
-		// ── TEACHER 3 ─ IPS ──────────────────────────────────────────────────
+		// Guru 3 – IPS
 		{"3", "IPS", "7A", 4, ""},
 		{"3", "IPS", "7B", 4, ""},
 		{"3", "IPS", "7C", 4, ""},
@@ -329,7 +335,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"3", "IPS", "8E", 4, ""},
 		{"3", "IPS", "8F", 4, ""},
 
-		// ── TEACHER 4 ─ IPA ──────────────────────────────────────────────────
+		// Guru 4 – IPA
 		{"4", "IPA", "8A", 3, ""},
 		{"4", "IPA", "8B", 3, ""},
 		{"4", "IPA", "8C", 3, ""},
@@ -337,7 +343,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"4", "IPA", "8E", 3, ""},
 		{"4", "IPA", "8F", 3, ""},
 
-		// ── TEACHER 5 ─ Pendidikan Lingkungan Hidup ──────────────────────────
+		// Guru 5 – BK
 		{"5", "BK", "7A", 1, ""},
 		{"5", "BK", "7B", 1, ""},
 		{"5", "BK", "7C", 1, ""},
@@ -347,14 +353,14 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"5", "BK", "8B", 1, ""},
 		{"5", "BK", "8C", 1, ""},
 
-		// ── TEACHER 6 ─ Matematika ───────────────────────────────────────────
+		// Guru 6 – Matematika
 		{"6", "Matematika", "9A", 5, ""},
 		{"6", "Matematika", "9B", 5, ""},
 		{"6", "Matematika", "9C", 5, ""},
 		{"6", "Matematika", "9D", 5, ""},
 		{"6", "Matematika", "9E", 5, ""},
 
-		// ── TEACHER 7 ─ Pendidikan Lingkungan Hidup ──────────────────────────
+		// Guru 7 – BK
 		{"7", "BK", "8D", 1, ""},
 		{"7", "BK", "8E", 1, ""},
 		{"7", "BK", "8F", 1, ""},
@@ -364,7 +370,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"7", "BK", "9D", 1, ""},
 		{"7", "BK", "9E", 1, ""},
 
-		// ── TEACHER 8 ─ Informatika ──────────────────────────────────────────
+		// Guru 8 – Informatika
 		{"8", "Informatika", "7A", 3, ""},
 		{"8", "Informatika", "7B", 3, ""},
 		{"8", "Informatika", "7C", 3, ""},
@@ -374,7 +380,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"8", "Informatika", "9D", 3, ""},
 		{"8", "Informatika", "9E", 3, ""},
 
-		// ── TEACHER 9 ─ PJOK ─────────────────────────────────────────────────
+		// Guru 9 – PJOK
 		{"9", "PJOK", "8D", 3, ""},
 		{"9", "PJOK", "8E", 3, ""},
 		{"9", "PJOK", "8F", 3, ""},
@@ -384,14 +390,14 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"9", "PJOK", "9D", 3, ""},
 		{"9", "PJOK", "9E", 3, ""},
 
-		// ── TEACHER 10 ─ IPA ─────────────────────────────────────────────────
+		// Guru 10 – IPA
 		{"10", "IPA", "9A", 5, ""},
 		{"10", "IPA", "9B", 5, ""},
 		{"10", "IPA", "9C", 5, ""},
 		{"10", "IPA", "9D", 5, ""},
 		{"10", "IPA", "9E", 5, ""},
 
-		// ── TEACHER 11 ─ Agama ───────────────────────────────────────────────
+		// Guru 11 – Agama
 		{"11", "Agama", "8A", 3, ""},
 		{"11", "Agama", "8B", 3, ""},
 		{"11", "Agama", "8C", 3, ""},
@@ -401,14 +407,14 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"11", "Agama", "9D", 3, ""},
 		{"11", "Agama", "9E", 3, ""},
 
-		// ── TEACHER 12 ─ Matematika ──────────────────────────────────────────
+		// Guru 12 – Matematika
 		{"12", "Matematika", "7A", 5, ""},
 		{"12", "Matematika", "7B", 5, ""},
 		{"12", "Matematika", "7C", 5, ""},
 		{"12", "Matematika", "7D", 5, ""},
 		{"12", "Matematika", "7E", 5, ""},
 
-		// ── TEACHER 13 ─ Agama ───────────────────────────────────────────────
+		// Guru 13 – Agama
 		{"13", "Agama", "7A", 3, ""},
 		{"13", "Agama", "7B", 3, ""},
 		{"13", "Agama", "7C", 3, ""},
@@ -418,21 +424,21 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"13", "Agama", "8E", 3, ""},
 		{"13", "Agama", "8F", 3, ""},
 
-		// ── TEACHER 14 ─ Bahasa Indonesia ────────────────────────────────────
+		// Guru 14 – Bahasa Indonesia
 		{"14", "Bahasa Indonesia", "9A", 6, ""},
 		{"14", "Bahasa Indonesia", "9B", 6, ""},
 		{"14", "Bahasa Indonesia", "9C", 6, ""},
 		{"14", "Bahasa Indonesia", "9D", 6, ""},
 		{"14", "Bahasa Indonesia", "9E", 6, ""},
 
-		// ── TEACHER 15 ─ Bahasa Inggris ──────────────────────────────────────
+		// Guru 15 – Bahasa Inggris
 		{"15", "Bahasa Inggris", "9A", 4, ""},
 		{"15", "Bahasa Inggris", "9B", 4, ""},
 		{"15", "Bahasa Inggris", "9C", 4, ""},
 		{"15", "Bahasa Inggris", "9D", 4, ""},
 		{"15", "Bahasa Inggris", "9E", 4, ""},
 
-		// ── TEACHER 16 ─ IPS ─────────────────────────────────────────────────
+		// Guru 16 – IPS
 		{"16", "IPS", "8A", 4, ""},
 		{"16", "IPS", "8B", 4, ""},
 		{"16", "IPS", "8C", 4, ""},
@@ -442,14 +448,14 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"16", "IPS", "9D", 4, ""},
 		{"16", "IPS", "9E", 4, ""},
 
-		// ── TEACHER 19 ─ Bahasa Inggris ──────────────────────────────────────
+		// Guru 19 – Bahasa Inggris
 		{"19", "Bahasa Inggris", "7A", 4, ""},
 		{"19", "Bahasa Inggris", "7B", 4, ""},
 		{"19", "Bahasa Inggris", "7C", 4, ""},
 		{"19", "Bahasa Inggris", "7D", 4, ""},
 		{"19", "Bahasa Inggris", "7E", 4, ""},
 
-		// ── TEACHER 20 ─ Bahasa Inggris ──────────────────────────────────────
+		// Guru 20 – Bahasa Inggris
 		{"20", "Bahasa Inggris", "8A", 4, ""},
 		{"20", "Bahasa Inggris", "8B", 4, ""},
 		{"20", "Bahasa Inggris", "8C", 4, ""},
@@ -457,7 +463,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"20", "Bahasa Inggris", "8E", 4, ""},
 		{"20", "Bahasa Inggris", "8F", 4, ""},
 
-		// ── TEACHER 21 ─ Bahasa Indonesia ────────────────────────────────────
+		// Guru 21 – Bahasa Indonesia
 		{"21", "Bahasa Indonesia", "8A", 5, ""},
 		{"21", "Bahasa Indonesia", "8B", 5, ""},
 		{"21", "Bahasa Indonesia", "8C", 5, ""},
@@ -465,7 +471,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"21", "Bahasa Indonesia", "8E", 5, ""},
 		{"21", "Bahasa Indonesia", "8F", 5, ""},
 
-		// ── TEACHER 22 ─ Informatika ─────────────────────────────────────────
+		// Guru 22 – Informatika
 		{"22", "Informatika", "7D", 3, ""},
 		{"22", "Informatika", "7E", 3, ""},
 		{"22", "Informatika", "8A", 3, ""},
@@ -475,7 +481,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"22", "Informatika", "8E", 3, ""},
 		{"22", "Informatika", "8F", 3, ""},
 
-		// ── TEACHER 23 ─ Pancasila ───────────────────────────────────────────
+		// Guru 23 – Pancasila
 		{"23", "Pancasila", "7A", 3, ""},
 		{"23", "Pancasila", "7B", 3, ""},
 		{"23", "Pancasila", "7C", 3, ""},
@@ -486,21 +492,21 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"23", "Pancasila", "9D", 3, ""},
 		{"23", "Pancasila", "9E", 3, ""},
 
-		// ── TEACHER 24 ─ Bahasa Indonesia ────────────────────────────────────
+		// Guru 24 – Bahasa Indonesia
 		{"24", "Bahasa Indonesia", "7A", 6, ""},
 		{"24", "Bahasa Indonesia", "7B", 6, ""},
 		{"24", "Bahasa Indonesia", "7C", 6, ""},
 		{"24", "Bahasa Indonesia", "7D", 6, ""},
 		{"24", "Bahasa Indonesia", "7E", 6, ""},
 
-		// ── TEACHER 26 ─ IPA ─────────────────────────────────────────────────
+		// Guru 26 – IPA
 		{"26", "IPA", "7A", 5, ""},
 		{"26", "IPA", "7B", 5, ""},
 		{"26", "IPA", "7C", 5, ""},
 		{"26", "IPA", "7D", 5, ""},
 		{"26", "IPA", "7E", 5, ""},
 
-		// ── TEACHER 27 ─ Matematika ──────────────────────────────────────────
+		// Guru 27 – Matematika
 		{"27", "Matematika", "8A", 5, ""},
 		{"27", "Matematika", "8B", 5, ""},
 		{"27", "Matematika", "8C", 5, ""},
@@ -508,7 +514,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"27", "Matematika", "8E", 5, ""},
 		{"27", "Matematika", "8F", 5, ""},
 
-		// ── TEACHER 28 ─ PJOK ────────────────────────────────────────────────
+		// Guru 28 – PJOK
 		{"28", "PJOK", "7A", 3, ""},
 		{"28", "PJOK", "7B", 3, ""},
 		{"28", "PJOK", "7C", 3, ""},
@@ -517,9 +523,8 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"28", "PJOK", "8A", 3, ""},
 		{"28", "PJOK", "8B", 3, ""},
 		{"28", "PJOK", "8C", 3, ""},
-
 	}
-	// SBP assignments are auto-generated below from active classes — not hardcoded here.
+	// Penugasan SBP dibuat otomatis, tidak perlu diisi manual.
 
 	var existingAssignments []teachingassignments.TeachingAssignment
 	if err := db.Find(&existingAssignments).Error; err != nil {
@@ -583,7 +588,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		}
 	}
 
-	// Auto-generate SBP assignments for all active classes, grouped by grade in chunks of 3.
+	// Buat penugasan SBP otomatis per tingkat (maks 3 kelas/grup).
 	if err := seedSBPAssignments(db, existingSet, subjectMap, classMap); err != nil {
 		return fmt.Errorf("seed SBP assignments: %w", err)
 	}
@@ -595,7 +600,7 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 func seedSBPAssignments(db *gorm.DB, existingSet map[string]struct{}, subjectMap map[string]uint, classMap map[string]uint) error {
 	sbpSubjectID, ok := subjectMap["Seni Budaya"]
 	if !ok {
-		return nil // subject not seeded yet — skip
+		return nil // mata pelajaran belum ada, lewati
 	}
 
 	var activeClasses []classes.Class

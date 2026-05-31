@@ -5,8 +5,8 @@ import (
 	"sort"
 )
 
-// Gene is the scheduled placement for one MatrixBlock.
-// The zero value (Day == "") means the block is not yet placed.
+// Gene adalah penempatan terjadwal untuk satu MatrixBlock.
+// Nilai kosong (Day == "") berarti blok belum ditempatkan.
 type Gene struct {
 	Day       string
 	StartSlot int
@@ -14,9 +14,9 @@ type Gene struct {
 
 func (g Gene) IsPlaced() bool { return g.Day != "" }
 
-// Chromosome holds one candidate schedule as an ordered slice of Genes.
-// Index i in the gene slice corresponds to index i in the associated block slice.
-// The chromosome does not own the block slice; callers supply it at every operation.
+// Chromosome menyimpan satu solusi jadwal kandidat sebagai slice Gene berurutan.
+// Indeks i pada slice gene bersesuaian dengan indeks i pada slice blok terkait.
+// Chromosome tidak memiliki slice blok; pemanggil menyediakannya di setiap operasi.
 type Chromosome struct {
 	genes []Gene
 }
@@ -25,8 +25,8 @@ func NewChromosome(n int) Chromosome {
 	return Chromosome{genes: make([]Gene, n)}
 }
 
-func (c Chromosome) Len() int        { return len(c.genes) }
-func (c Chromosome) Get(i int) Gene  { return c.genes[i] }
+func (c Chromosome) Len() int           { return len(c.genes) }
+func (c Chromosome) Get(i int) Gene     { return c.genes[i] }
 func (c *Chromosome) Set(i int, g Gene) { c.genes[i] = g }
 
 func (c Chromosome) Clone() Chromosome {
@@ -35,44 +35,44 @@ func (c Chromosome) Clone() Chromosome {
 	return Chromosome{genes: cp}
 }
 
-// pjokCutoffTime is the latest allowed end time for a PJOK 2JP block.
+// pjokCutoffTime adalah batas waktu selesai untuk blok PJOK 2JP.
 const pjokCutoffTime = "10:50"
 
-// sortEntry is used to order blocks by placement difficulty before building chromosomes.
+// sortEntry mengurutkan blok berdasarkan kesulitan penempatan sebelum membuat kromosom.
 type sortEntry struct {
 	origIdx int
 	block   MatrixBlock
-	weight  int // lower weight = processed earlier (tighter constraint)
+	weight  int // bobot lebih kecil = diproses lebih awal (batasan lebih ketat)
 }
 
-// sortByWeight sorts entries ascending by weight in place.
+// sortByWeight mengurutkan entries secara menaik berdasarkan bobot.
 func sortByWeight(entries []sortEntry) {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].weight < entries[j].weight
 	})
 }
 
-// ── Soft violation scoring ────────────────────────────────────────────────────
+// ── Perhitungan pelanggaran ringan ────────────────────────────────────────────
 
-// PenaltyBreakdown holds per-category soft penalty counts for one schedule.
-// PJOKOvertime contributes 3× to the weighted optimisation score; others contribute 1×.
+// PenaltyBreakdown menyimpan jumlah penalti ringan per kategori untuk satu jadwal.
+// PJOKOvertime berkontribusi 3× pada skor optimasi; kategori lain berkontribusi 1×.
 type PenaltyBreakdown struct {
-	DaySplitCount      int // same-day blocks of the same (class, subject)
-	DaySplitGroupCount int // subset of DaySplitCount involving SBP parallel group members
-	PJOKOvertime       int // PJOK 2JP blocks ending after pjokCutoffTime
+	DaySplitCount      int // blok (kelas, mapel) yang jatuh pada hari yang sama
+	DaySplitGroupCount int // subset DaySplitCount yang melibatkan anggota grup paralel SBP
+	PJOKOvertime       int // blok PJOK 2JP yang selesai setelah pjokCutoffTime
 }
 
-// Total returns the unweighted penalty count (sum of all categories without PJOK multiplier).
+// Total mengembalikan jumlah penalti tanpa pembobotan (tanpa multiplier PJOK).
 func (bd PenaltyBreakdown) Total() int {
 	return bd.DaySplitCount
 }
 
-// BreakdownSoftViolations returns a per-category soft penalty breakdown for a decoded schedule.
-// Use Total() to retrieve the weighted optimisation score.
+// BreakdownSoftViolations mengembalikan rincian penalti ringan per kategori untuk jadwal hasil decode.
+// Gunakan Total() untuk mendapatkan skor optimasi berbobot.
 func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokSubjectID uint) PenaltyBreakdown {
 	var bd PenaltyBreakdown
 
-	// mark which block IDs are parallel group members
+	// tandai blok yang merupakan anggota grup paralel
 	isGrouped := make(map[uint]bool, len(blocks))
 	for _, b := range blocks {
 		if b.GroupKey != nil {
@@ -80,7 +80,7 @@ func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokS
 		}
 	}
 
-	// same-day split: count how many blocks of each (class, subject) land on the same day
+	// hitung blok (kelas, mapel) yang jatuh pada hari yang sama
 	classSubjectBlocks := make(map[courseDayKey][]uint)
 	for _, b := range blocks {
 		if pjokSubjectID != 0 && b.SubjectID == pjokSubjectID {
@@ -114,7 +114,7 @@ func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokS
 		}
 	}
 
-	// PJOK 2JP overtime: blocks ending after pjokCutoffTime carry a weight-3 penalty
+	// blok PJOK 2JP yang selesai setelah pjokCutoffTime dikenai penalti bobot 3
 	if pjokSubjectID != 0 {
 		periods := GenerateSlots()
 		endTimeAt := make(map[string]map[int]string, len(periods))
@@ -142,9 +142,9 @@ func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokS
 	return bd
 }
 
-// CountSoftViolations computes the weighted soft violation total for a decoded matrix.
-// This is the hot-path version used in the GA inner loop — minimal allocations.
-// Call BreakdownSoftViolations only for reporting.
+// CountSoftViolations menghitung total pelanggaran ringan berbobot untuk matriks hasil decode.
+// Versi cepat untuk inner loop GA — alokasi minimal.
+// Panggil BreakdownSoftViolations hanya untuk pelaporan.
 func CountSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokSubjectID uint) int {
 	total := 0
 
@@ -176,11 +176,11 @@ func CountSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokSubje
 	return total
 }
 
-// ── Candidate index ───────────────────────────────────────────────────────────
+// ── Indeks kandidat ───────────────────────────────────────────────────────────
 
-// BuildCandidateIndex pre-computes all physically valid (Day, StartSlot) positions
-// for every block. A position is valid when all slots in the duration window are unblocked.
-// PJOK 2JP blocks are restricted to morning slots ending at or before pjokCutoffTime.
+// BuildCandidateIndex menghitung semua posisi (Day, StartSlot) yang valid secara fisik
+// untuk setiap blok. Posisi valid jika semua slot dalam rentang durasi tidak diblokir.
+// Blok PJOK 2JP dibatasi pada slot pagi yang selesai tidak melebihi pjokCutoffTime.
 func BuildCandidateIndex(blocks []MatrixBlock, pjokSubjectID uint, daySlots DaySlots) map[uint][]Gene {
 	if daySlots == nil {
 		daySlots = GenerateSlots()
@@ -202,7 +202,7 @@ func BuildCandidateIndex(blocks []MatrixBlock, pjokSubjectID uint, daySlots DayS
 	return index
 }
 
-// filterMorningSlots keeps only 2JP candidates whose window ends at or before pjokCutoffTime.
+// filterMorningSlots menyaring kandidat 2JP yang berakhir tidak melebihi pjokCutoffTime.
 func filterMorningSlots(candidates []Gene, daySlots DaySlots) []Gene {
 	endAt := make(map[string]map[int]string, len(daySlots))
 	for day, slots := range daySlots {
@@ -221,7 +221,7 @@ func filterMorningSlots(candidates []Gene, daySlots DaySlots) []Gene {
 	return result
 }
 
-// candidatesForDuration enumerates all valid start positions for a block of the given duration.
+// candidatesForDuration menghitung semua posisi awal yang valid untuk blok berdurasi tertentu.
 func candidatesForDuration(duration int, daySlots DaySlots) []Gene {
 	var result []Gene
 	for _, day := range MatrixDays {
@@ -251,11 +251,11 @@ func candidatesForDuration(duration int, daySlots DaySlots) []Gene {
 	return result
 }
 
-// ── Chromosome construction ───────────────────────────────────────────────────
+// ── Pembentukan kromosom ──────────────────────────────────────────────────────
 
-// DecodeChromosome translates a chromosome into a ScheduleMatrix by placing each block
-// at its encoded (Day, StartSlot). Blocks that are unplaced or that conflict with
-// already-placed blocks are skipped; the returned integer counts those failures.
+// DecodeChromosome menerjemahkan kromosom menjadi ScheduleMatrix dengan menempatkan setiap blok
+// pada posisi (Day, StartSlot) yang dikodekan. Blok yang belum ditempatkan atau konflik
+// dilewati; bilangan bulat yang dikembalikan menunjukkan jumlah kegagalan tersebut.
 func DecodeChromosome(c Chromosome, blocks []MatrixBlock, daySlots DaySlots, pjokSubjectID uint) (*ScheduleMatrix, int) {
 	grid := NewScheduleMatrix(nil, nil, blocks, daySlots)
 	grid.EnableDayDiversity()
@@ -276,8 +276,8 @@ func DecodeChromosome(c Chromosome, blocks []MatrixBlock, daySlots DaySlots, pjo
 	return grid, missing
 }
 
-// RandomChromosome creates a chromosome with each block assigned a uniformly random
-// valid position from candidateIndex. Parallel group members share the same gene.
+// RandomChromosome membuat kromosom dengan setiap blok diberi posisi acak yang valid
+// dari candidateIndex. Anggota grup paralel berbagi gen yang sama.
 func RandomChromosome(blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, rng *rand.Rand) Chromosome {
 	ch := NewChromosome(len(blocks))
 	visited := make(map[int]bool)
@@ -301,10 +301,10 @@ func RandomChromosome(blocks []MatrixBlock, candidateIndex map[uint][]Gene, grou
 	return ch
 }
 
-// SmartChromosome builds a chromosome by placing blocks greedily from most constrained
-// to least constrained. PJOK 2JP blocks (weight -1) are always first; remaining blocks
-// are ordered by number of available candidates. Each block receives a random conflict-free
-// candidate from the partially built matrix, so the result usually decodes with 0 unplaced.
+// SmartChromosome membangun kromosom secara greedy dari blok paling terkendala ke paling longgar.
+// Blok PJOK 2JP (bobot -1) selalu diproses pertama; blok lain diurutkan berdasarkan jumlah kandidat.
+// Setiap blok mendapat kandidat acak bebas konflik dari matriks yang sedang dibangun,
+// sehingga hasilnya biasanya menghasilkan 0 blok yang tidak ditempatkan.
 func SmartChromosome(blocks []MatrixBlock, candidateIndex map[uint][]Gene, groups GroupIndex, daySlots DaySlots, pjokSubjectID uint, rng *rand.Rand) Chromosome {
 	entries := make([]sortEntry, len(blocks))
 	for i, b := range blocks {
@@ -361,8 +361,8 @@ func SmartChromosome(blocks []MatrixBlock, candidateIndex map[uint][]Gene, group
 	return ch
 }
 
-// MutateGene replaces the gene at position i with a new random candidate from candidateIndex.
-// Group propagation is the caller's responsibility.
+// MutateGene mengganti gen pada posisi i dengan kandidat acak baru dari candidateIndex.
+// Propagasi grup adalah tanggung jawab pemanggil.
 func MutateGene(c *Chromosome, i int, block MatrixBlock, candidateIndex map[uint][]Gene, rng *rand.Rand) {
 	candidates := candidateIndex[block.ID]
 	if len(candidates) == 0 {
@@ -371,11 +371,11 @@ func MutateGene(c *Chromosome, i int, block MatrixBlock, candidateIndex map[uint
 	c.Set(i, candidates[rng.Intn(len(candidates))])
 }
 
-// ConstraintAwareCrossover produces an offspring chromosome from two parents. Blocks are
-// processed in constraint-tightness order (PJOK 2JP first, then fewest candidates first),
-// and for each block the gene that is conflict-free in the partially built child matrix is
-// preferred. When both parents are valid the choice is random; when neither is valid a
-// random conflict-free fallback is chosen from candidateIndex.
+// ConstraintAwareCrossover menghasilkan kromosom keturunan dari dua induk.
+// Blok diproses dalam urutan ketertataan (PJOK 2JP pertama, lalu kandidat tersedikit),
+// dan untuk setiap blok dipilih gen yang bebas konflik di matriks anak yang sedang dibangun.
+// Jika kedua induk valid, dipilih secara acak; jika tidak ada yang valid,
+// diambil kandidat bebas konflik acak dari candidateIndex.
 func ConstraintAwareCrossover(
 	a, b Chromosome,
 	blocks []MatrixBlock,
@@ -482,8 +482,8 @@ func ConstraintAwareCrossover(
 	return offspring
 }
 
-// groupFitsAt returns true when every block in the group can be placed at the given gene
-// simultaneously in the current matrix state.
+// groupFitsAt mengembalikan true jika setiap blok dalam grup dapat ditempatkan
+// pada gen yang diberikan secara simultan di kondisi matriks saat ini.
 func groupFitsAt(groupIndices []int, blocks []MatrixBlock, gene Gene, matrix *ScheduleMatrix) bool {
 	for _, j := range groupIndices {
 		if matrix.CanPlaceBlock(blocks[j].ID, gene.Day, gene.StartSlot) != nil {

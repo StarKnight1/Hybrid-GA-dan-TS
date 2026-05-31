@@ -1,24 +1,25 @@
 package algorithm
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"time"
 )
 
-// TSConfig holds tunable parameters for the Tabu Search phase.
+// TSConfig menyimpan parameter yang dapat diatur untuk fase Tabu Search.
 type TSConfig struct {
-	Tenure         int // iterations a move stays forbidden; 0 uses default 15
+	Tenure         int // iterasi suatu perpindahan tetap dilarang; 0 pakai default 15
 	MaxIterations  int
 	ReportInterval int
 	RandSeed       int64
-	ShakeCount     int // blocks to evict when stagnant; 0 = disabled
-	ShakeAfter     int // iterations without improvement before shaking; 0 = disabled
+	ShakeCount     int // jumlah blok yang dievict saat stagnan; 0 = nonaktif
+	ShakeAfter     int // iterasi tanpa peningkatan sebelum shake dilakukan; 0 = nonaktif
 	PJOKSubjID     uint
 	OnSnapshot     func(TSProgress)
 }
 
-// TSProgress carries per-iteration metrics emitted via OnSnapshot.
+// TSProgress membawa metrik per-iterasi yang dikirim melalui OnSnapshot.
 type TSProgress struct {
 	Iteration             int
 	TabuListSize          int
@@ -29,7 +30,7 @@ type TSProgress struct {
 	Elapsed               time.Duration
 }
 
-// TSResult holds the best solution found by RunTS.
+// TSResult menyimpan solusi terbaik yang ditemukan oleh RunTS.
 type TSResult struct {
 	Chromosome     Chromosome
 	Matrix         *ScheduleMatrix
@@ -39,7 +40,7 @@ type TSResult struct {
 	Elapsed        time.Duration
 }
 
-// DefaultTSConfig returns sensible defaults for the Tabu Search phase.
+// DefaultTSConfig mengembalikan nilai default yang wajar untuk fase Tabu Search.
 func DefaultTSConfig() TSConfig {
 	return TSConfig{
 		Tenure:         15,
@@ -51,26 +52,26 @@ func DefaultTSConfig() TSConfig {
 	}
 }
 
-// ── Tabu list management ──────────────────────────────────────────────────────
+// ── Manajemen daftar tabu ─────────────────────────────────────────────────────
 
-// moveKey is the composite key for a tabu list entry: (block, position) pair.
+// moveKey adalah kunci komposit untuk entri daftar tabu: pasangan (blok, posisi).
 type moveKey struct {
 	blockID uint
 	gene    Gene
 }
 
-// isForbidden returns true when the given (blockID, gene) move is currently tabu.
+// isForbidden mengembalikan true jika perpindahan (blockID, gene) saat ini ada dalam daftar tabu.
 func isForbidden(tabuList map[moveKey]int, blockID uint, gene Gene, iter int) bool {
 	expiry, ok := tabuList[moveKey{blockID, gene}]
 	return ok && expiry > iter
 }
 
-// forbidMove adds (blockID, gene) to the tabu list with an expiry of iter+tenure.
+// forbidMove menambahkan (blockID, gene) ke daftar tabu dengan kedaluwarsa iter+tenure.
 func forbidMove(tabuList map[moveKey]int, blockID uint, gene Gene, iter, tenure int) {
 	tabuList[moveKey{blockID, gene}] = iter + tenure
 }
 
-// cleanTabuList removes all entries that have expired by iteration iter.
+// cleanTabuList menghapus semua entri yang sudah kedaluwarsa pada iterasi iter.
 func cleanTabuList(tabuList map[moveKey]int, iter int) {
 	for k, expiry := range tabuList {
 		if expiry <= iter {
@@ -79,9 +80,9 @@ func cleanTabuList(tabuList map[moveKey]int, iter int) {
 	}
 }
 
-// ── Shared TS state ───────────────────────────────────────────────────────────
+// ── State bersama TS ──────────────────────────────────────────────────────────
 
-// tsState carries all mutable state shared between the unplaced-move and swap-move handlers.
+// tsState menyimpan semua state yang dapat berubah dan dipakai bersama oleh penangan unplaced dan swap.
 type tsState struct {
 	grid        *ScheduleMatrix
 	placed      []uint
@@ -93,10 +94,11 @@ type tsState struct {
 	validPos    map[uint]map[Gene]struct{}
 }
 
-// ── Move handlers ─────────────────────────────────────────────────────────────
+// ── Penangan perpindahan ──────────────────────────────────────────────────────
 
-// handleUnplaced attempts to place one unplaced block, displacing at most two placed
-// blocks when necessary. Returns the net change in unplaced count (negative = improvement).
+// handleUnplaced mencoba menempatkan satu blok yang belum terjadwal, dengan mengevict
+// maksimal dua blok yang sudah ada jika diperlukan. Mengembalikan perubahan bersih
+// pada jumlah unplaced (negatif = peningkatan).
 func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][]Gene, bestUnplaced, bestPenalty, iter, tenure int, pjokID uint, acak *rand.Rand) {
 	if len(st.unplaced) == 0 {
 		return
@@ -105,7 +107,7 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 	targetBlock := st.blockByID[targetID]
 	candidates := candidateIndex[targetID]
 
-	// Parallel group blocks must be placed together.
+	// Blok grup paralel harus ditempatkan bersama.
 	if groupIDs, isGrouped := st.groupByID[targetID]; isGrouped {
 		if pos, ok := findGroupSlot(st.grid, groupIDs, st.blockByID, candidates, acak); ok {
 			for _, id := range groupIDs {
@@ -133,7 +135,7 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 
 	switch len(conflicts) {
 	case 0:
-		// Free placement: always accepted (net -1 unplaced).
+		// Penempatan bebas: selalu diterima (net -1 unplaced).
 		if st.grid.PlaceBlock(targetID, pos.Day, pos.StartSlot) == nil {
 			st.unplaced = dropID(st.unplaced, targetID)
 			st.placed = append(st.placed, targetID)
@@ -141,7 +143,7 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 		}
 
 	case 1:
-		// Single displace: evict one placed block, place target, re-place evicted elsewhere.
+		// Geser satu: evict satu blok, tempatkan target, coba tempatkan kembali yang di-evict.
 		displacedID := conflicts[0]
 		if _, isGroup := st.groupByID[displacedID]; isGroup {
 			break
@@ -169,13 +171,13 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 			st.placed = append(st.placed, displacedID)
 			forbidMove(st.tabuList, displacedID, origGene, iter, tenure)
 		} else {
-			// Trade (net 0): accept; record evicted position as tabu.
+			// Tukar (net 0): terima; catat posisi yang di-evict sebagai tabu.
 			forbidMove(st.tabuList, displacedID, origGene, iter, tenure)
 		}
 		st.currPenalty = CountSoftViolations(st.grid, blocks, pjokID)
 
 	case 2:
-		// Chain displace: evict two blocks; reject if neither can be re-placed (net +1).
+		// Geser dua: evict dua blok; tolak jika keduanya tidak bisa ditempatkan kembali (net +1).
 		d1, d2 := conflicts[0], conflicts[1]
 		if _, ok := st.groupByID[d1]; ok {
 			break
@@ -226,7 +228,7 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 			forbidMove(st.tabuList, d2, origG2, iter, tenure)
 			st.currPenalty = CountSoftViolations(st.grid, blocks, pjokID)
 		} else {
-			// net +1: fully revert.
+			// net +1: batalkan sepenuhnya.
 			_ = st.grid.RemoveBlock(targetID)
 			st.placed = dropID(st.placed, targetID)
 			st.unplaced = append(st.unplaced, targetID)
@@ -239,7 +241,7 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 	}
 }
 
-// handleSwap attempts to swap two placed blocks to reduce soft penalty.
+// handleSwap mencoba menukar dua blok yang sudah ditempatkan untuk mengurangi penalti ringan.
 func handleSwap(st *tsState, blocks []MatrixBlock, bestUnplaced, bestPenalty, iter, tenure int, pjokID uint, acak *rand.Rand) {
 	if len(st.placed) < 2 {
 		return
@@ -314,8 +316,7 @@ func handleSwap(st *tsState, blocks []MatrixBlock, bestUnplaced, bestPenalty, it
 	}
 }
 
-// validSlotsOf retrieves the valid candidate list for a block from the tsState's
-// validPos set (used only inside handleSwap to pass to shiftParallelGroup).
+// validSlotsOf mengambil daftar kandidat valid untuk sebuah blok dari set validPos pada tsState.
 func validSlotsOf(st *tsState, blockID uint) []Gene {
 	m := st.validPos[blockID]
 	result := make([]Gene, 0, len(m))
@@ -325,8 +326,9 @@ func validSlotsOf(st *tsState, blockID uint) []Gene {
 	return result
 }
 
-// shiftParallelGroup tries to relocate an entire SBP parallel group to a new slot.
-// Accepted moves record old positions as tabu; tabu moves are accepted only via aspiration.
+// shiftParallelGroup mencoba memindahkan seluruh grup paralel SBP ke slot baru.
+// Perpindahan yang diterima mencatat posisi lama sebagai tabu;
+// perpindahan tabu hanya diterima jika memenuhi kriteria aspirasi.
 func shiftParallelGroup(
 	grid *ScheduleMatrix,
 	groupIDs []uint,
@@ -398,21 +400,22 @@ func shiftParallelGroup(
 	*currPenalty = newPenalty
 }
 
-// ── Main entry point ──────────────────────────────────────────────────────────
+// ── Titik masuk utama ─────────────────────────────────────────────────────────
 
-// RunTS refines the best GA solution using Tabu Search with direct matrix operations.
+// RunTS memperhalus solusi terbaik GA menggunakan Tabu Search dengan operasi matriks langsung.
 //
-// Accepted move types:
-//   - Free placement: unplaced block → empty slot (net -1 unplaced, always accepted)
-//   - Single displace: unplaced block displaces one placed block which is re-placed elsewhere
-//   - Chain displace: unplaced block displaces two placed blocks (rejected if net +1)
-//   - Swap: two placed blocks exchange slots to reduce soft penalty
+// Jenis perpindahan yang diterima:
+//   - Penempatan bebas: blok unplaced → slot kosong (net -1 unplaced, selalu diterima)
+//   - Geser satu: blok unplaced menggeser satu blok yang sudah ada, lalu dicoba ditempatkan kembali
+//   - Geser dua: blok unplaced menggeser dua blok (ditolak jika net +1)
+//   - Tukar: dua blok bertukar slot untuk mengurangi penalti ringan
 //
-// The tabu list forbids recently undone moves for Tenure iterations, preventing cycling.
-// Tabu moves are accepted when the aspiration criterion is met (result beats global best).
-// Perturbation (shaking): when best is stagnant for ShakeAfter iterations, ShakeCount
-// random placed blocks are evicted to escape local optima.
+// Daftar tabu melarang perpindahan yang baru dibatalkan selama Tenure iterasi untuk mencegah siklus.
+// Perpindahan tabu diterima jika kriteria aspirasi terpenuhi (hasil lebih baik dari best global).
+// Perturbasi (shake): jika best stagnan selama ShakeAfter iterasi, ShakeCount blok dievict
+// untuk keluar dari optimum lokal.
 func RunTS(
+	ctx context.Context,
 	gaResult GAResult,
 	blocks []MatrixBlock,
 	candidateIndex map[uint][]Gene,
@@ -508,6 +511,9 @@ func RunTS(
 	emittedLast := false
 
 	for iter := 1; iter <= cfg.MaxIterations; iter++ {
+		if ctx.Err() != nil {
+			break
+		}
 		if bestUnplaced == 0 && bestPenalty == 0 {
 			break
 		}

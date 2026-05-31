@@ -13,5 +13,6 @@ func RegisterRoutes(r *gin.Engine) {
 
 	g.GET("/template", DownloadTemplateHandler)
 	g.POST("/upload", UploadDataHandler)
+	g.DELETE("/data", ClearDataHandler)
 	g.GET("/data-status", DataStatusHandler)
 }

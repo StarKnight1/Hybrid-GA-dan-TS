@@ -4,22 +4,22 @@ import (
 	"fmt"
 )
 
-// CellState indicates whether a grid cell is free, blocked, or occupied by a block.
+// CellState menunjukkan apakah sel grid kosong, diblokir, atau terisi oleh blok.
 type CellState uint8
 
 const (
-	EmptyCell   CellState = iota // available for placement
-	BlockedCell                  // permanently unavailable (e.g. prayer break, first period on Monday)
-	FilledCell                   // occupied by a scheduled lesson block
+	EmptyCell   CellState = iota // tersedia untuk penempatan
+	BlockedCell                  // tidak tersedia permanen (mis. jam istirahat, slot pertama Senin)
+	FilledCell                   // terisi oleh sesi pelajaran
 )
 
-// MatrixCell holds the occupancy status of a single time slot within a class or teacher grid.
+// MatrixCell menyimpan status hunian satu slot waktu dalam grid kelas atau guru.
 type MatrixCell struct {
 	State   CellState
 	BlockID uint
 }
 
-// BlockRecord stores the resolved placement of a scheduled block in the timetable.
+// BlockRecord menyimpan penempatan blok yang sudah terjadwal dalam jadwal pelajaran.
 type BlockRecord struct {
 	BlockID   uint
 	ClassID   uint
@@ -29,14 +29,14 @@ type BlockRecord struct {
 	Duration  int
 }
 
-// courseDayKey identifies a (class, subject) pair for day-diversity tracking.
+// courseDayKey mengidentifikasi pasangan (kelas, mapel) untuk pelacakan sebaran hari.
 type courseDayKey struct {
 	classID   uint
 	subjectID uint
 }
 
-// ScheduleMatrix is a two-dimensional constraint grid that tracks class and teacher occupancy.
-// Hard constraints (conflicts, blocked slots, day diversity) are enforced at insertion time.
+// ScheduleMatrix adalah grid kendala dua dimensi yang melacak hunian kelas dan guru.
+// Kendala keras (konflik, slot diblokir, sebaran hari) ditegakkan saat penyisipan.
 type ScheduleMatrix struct {
 	slots map[string][]Slot
 
@@ -45,14 +45,14 @@ type ScheduleMatrix struct {
 
 	blockSet    map[uint]MatrixBlock
 	placed      map[uint]BlockRecord
-	courseDays  map[courseDayKey]map[string]int // (class,subject) → day → count
+	courseDays  map[courseDayKey]map[string]int // (kelas,mapel) → hari → jumlah
 	diversityOn bool
-	exemptions  map[uint]bool // subjects excluded from the day-diversity constraint
+	exemptions  map[uint]bool // mapel yang dikecualikan dari kendala sebaran hari
 }
 
-// ── Read methods ──────────────────────────────────────────────────────────────
+// ── Metode baca ───────────────────────────────────────────────────────────────
 
-// ClassCell returns the grid cell for a class at a specific day and slot index.
+// ClassCell mengembalikan sel grid kelas pada hari dan indeks slot tertentu.
 func (s *ScheduleMatrix) ClassCell(classID uint, day string, slotIndex int) (MatrixCell, bool) {
 	rows, ok := s.classBoard[classID]
 	if !ok {
@@ -61,7 +61,7 @@ func (s *ScheduleMatrix) ClassCell(classID uint, day string, slotIndex int) (Mat
 	return lookupCell(rows, day, slotIndex)
 }
 
-// TeacherCell returns the grid cell for a teacher at a specific day and slot index.
+// TeacherCell mengembalikan sel grid guru pada hari dan indeks slot tertentu.
 func (s *ScheduleMatrix) TeacherCell(teacherID uint, day string, slotIndex int) (MatrixCell, bool) {
 	rows, ok := s.teacherBoard[teacherID]
 	if !ok {
@@ -70,21 +70,21 @@ func (s *ScheduleMatrix) TeacherCell(teacherID uint, day string, slotIndex int) 
 	return lookupCell(rows, day, slotIndex)
 }
 
-// Placement returns the BlockRecord for a placed block, or false if not placed.
+// Placement mengembalikan BlockRecord untuk blok yang sudah ditempatkan, atau false jika belum.
 func (s *ScheduleMatrix) Placement(blockID uint) (BlockRecord, bool) {
 	rec, ok := s.placed[blockID]
 	return rec, ok
 }
 
-// PlacedCount returns how many blocks are currently placed in the grid.
+// PlacedCount mengembalikan jumlah blok yang saat ini sudah ditempatkan di grid.
 func (s *ScheduleMatrix) PlacedCount() int {
 	return len(s.placed)
 }
 
-// ── Write methods ─────────────────────────────────────────────────────────────
+// ── Metode tulis ──────────────────────────────────────────────────────────────
 
-// CanPlaceBlock checks whether a block can legally be placed at (day, startSlot)
-// without committing the placement.
+// CanPlaceBlock memeriksa apakah blok dapat ditempatkan secara legal pada (day, startSlot)
+// tanpa melakukan penempatan sebenarnya.
 func (s *ScheduleMatrix) CanPlaceBlock(blockID uint, day string, startSlot int) error {
 	if _, alreadyPlaced := s.placed[blockID]; alreadyPlaced {
 		return fmt.Errorf("block %d is already placed", blockID)
@@ -96,7 +96,7 @@ func (s *ScheduleMatrix) CanPlaceBlock(blockID uint, day string, startSlot int) 
 	return s.checkPlacement(block, day, startSlot)
 }
 
-// PlaceBlock places a block at (day, startSlot), returning an error if the position is invalid.
+// PlaceBlock menempatkan blok pada (day, startSlot), mengembalikan error jika posisi tidak valid.
 func (s *ScheduleMatrix) PlaceBlock(blockID uint, day string, startSlot int) error {
 	if err := s.CanPlaceBlock(blockID, day, startSlot); err != nil {
 		return err
@@ -114,7 +114,7 @@ func (s *ScheduleMatrix) PlaceBlock(blockID uint, day string, startSlot int) err
 	return nil
 }
 
-// RemoveBlock lifts a placed block from the grid.
+// RemoveBlock mengangkat blok yang sudah ditempatkan dari grid.
 func (s *ScheduleMatrix) RemoveBlock(blockID uint) error {
 	rec, ok := s.placed[blockID]
 	if !ok {
@@ -125,7 +125,7 @@ func (s *ScheduleMatrix) RemoveBlock(blockID uint) error {
 	return nil
 }
 
-// MoveBlock relocates a placed block to a new position, or places it if it was unplaced.
+// MoveBlock memindahkan blok yang sudah ditempatkan ke posisi baru, atau menempatkannya jika belum ada.
 func (s *ScheduleMatrix) MoveBlock(blockID uint, day string, startSlot int) error {
 	oldRec, wasPlaced := s.placed[blockID]
 	if wasPlaced {
@@ -141,17 +141,17 @@ func (s *ScheduleMatrix) MoveBlock(blockID uint, day string, startSlot int) erro
 	return nil
 }
 
-// ── Diversity and validation ──────────────────────────────────────────────────
+// ── Sebaran hari dan validasi ─────────────────────────────────────────────────
 
-// EnableDaySpread activates the constraint that blocks of the same (class, subject)
-// must be scheduled on different days.
+// EnableDayDiversity mengaktifkan kendala bahwa blok (kelas, mapel) yang sama
+// harus dijadwalkan pada hari berbeda.
 func (s *ScheduleMatrix) EnableDayDiversity() {
 	s.diversityOn = true
 }
 
-// ExemptFromSpread excludes a subject from the day-diversity constraint.
-// PJOK is exempted because its 2JP (practical) and 1JP (theory) blocks share a subject ID
-// but may legitimately fall on the same day.
+// ExcludeSubjectFromDayDiversity mengecualikan mapel dari kendala sebaran hari.
+// PJOK dikecualikan karena blok 2JP (praktik) dan 1JP (teori) berbagi ID mapel
+// namun boleh jatuh pada hari yang sama.
 func (s *ScheduleMatrix) ExcludeSubjectFromDayDiversity(subjectID uint) {
 	if s.exemptions == nil {
 		s.exemptions = make(map[uint]bool)
@@ -159,7 +159,7 @@ func (s *ScheduleMatrix) ExcludeSubjectFromDayDiversity(subjectID uint) {
 	s.exemptions[subjectID] = true
 }
 
-// ValidateIntegrity performs a full consistency check across all placements and grid cells.
+// ValidateIntegrity melakukan pemeriksaan konsistensi penuh pada semua penempatan dan sel grid.
 func (s *ScheduleMatrix) ValidateIntegrity() error {
 	for blockID, rec := range s.placed {
 		block, ok := s.blockSet[blockID]
@@ -206,21 +206,21 @@ func (s *ScheduleMatrix) ValidateIntegrity() error {
 	return nil
 }
 
-// ── Constructor ───────────────────────────────────────────────────────────────
+// ── Konstruktor ───────────────────────────────────────────────────────────────
 
-// NewScheduleMatrix creates an empty constraint grid pre-populated with the given classes,
-// teachers, and blocks. Passing nil for daySlots uses the default weekly schedule.
+// NewScheduleMatrix membuat grid kendala kosong yang sudah terisi kelas, guru, dan blok.
+// Jika daySlots nil, digunakan jadwal mingguan default.
 func NewScheduleMatrix(classes []uint, teachers []uint, blocks []MatrixBlock, daySlots DaySlots) *ScheduleMatrix {
 	if daySlots == nil {
 		daySlots = GenerateSlots()
 	}
 	s := &ScheduleMatrix{
-		slots:       cloneSlots(daySlots),
-		classBoard:  make(map[uint]map[string][]MatrixCell),
+		slots:        cloneSlots(daySlots),
+		classBoard:   make(map[uint]map[string][]MatrixCell),
 		teacherBoard: make(map[uint]map[string][]MatrixCell),
-		blockSet:    make(map[uint]MatrixBlock, len(blocks)),
-		placed:      make(map[uint]BlockRecord),
-		courseDays:  make(map[courseDayKey]map[string]int),
+		blockSet:     make(map[uint]MatrixBlock, len(blocks)),
+		placed:       make(map[uint]BlockRecord),
+		courseDays:   make(map[courseDayKey]map[string]int),
 	}
 	for _, id := range classes {
 		s.initClassRows(id)
@@ -238,9 +238,9 @@ func NewScheduleMatrix(classes []uint, teachers []uint, blocks []MatrixBlock, da
 	return s
 }
 
-// ── Private helpers ───────────────────────────────────────────────────────────
+// ── Helper privat ─────────────────────────────────────────────────────────────
 
-// checkPlacement validates all constraints for placing block at (day, startSlot).
+// checkPlacement memvalidasi semua kendala untuk menempatkan blok pada (day, startSlot).
 func (s *ScheduleMatrix) checkPlacement(block MatrixBlock, day string, startSlot int) error {
 	if block.Duration <= 0 {
 		return fmt.Errorf("block %d has invalid duration %d", block.ID, block.Duration)
@@ -272,8 +272,8 @@ func (s *ScheduleMatrix) checkPlacement(block MatrixBlock, day string, startSlot
 	return s.checkDaySpread(block, day)
 }
 
-// checkDaySpread enforces the constraint that blocks of the same (class, subject)
-// must not fall on the same school day, unless the subject is exempted.
+// checkDaySpread menegakkan bahwa blok (kelas, mapel) yang sama tidak jatuh pada hari yang sama,
+// kecuali mapel tersebut dikecualikan.
 func (s *ScheduleMatrix) checkDaySpread(block MatrixBlock, day string) error {
 	if !s.diversityOn || s.exemptions[block.SubjectID] {
 		return nil
@@ -405,7 +405,7 @@ func (s *ScheduleMatrix) slotIsBlocked(day string, slotIndex int) bool {
 	return true
 }
 
-// lookupCell retrieves a cell from a day→row map by day and slot index.
+// lookupCell mengambil sel dari peta day→row berdasarkan hari dan indeks slot.
 func lookupCell(rows map[string][]MatrixCell, day string, slotIndex int) (MatrixCell, bool) {
 	row, ok := rows[day]
 	if !ok || slotIndex < 0 || slotIndex >= len(row) {
@@ -414,7 +414,7 @@ func lookupCell(rows map[string][]MatrixCell, day string, slotIndex int) (Matrix
 	return row[slotIndex], true
 }
 
-// buildRow converts a slot list into a MatrixCell row, marking each cell blocked or empty.
+// buildRow mengubah daftar slot menjadi baris MatrixCell, menandai setiap sel diblokir atau kosong.
 func buildRow(slots []Slot) []MatrixCell {
 	maxIdx := -1
 	for _, s := range slots {
@@ -439,7 +439,7 @@ func buildRow(slots []Slot) []MatrixCell {
 	return row
 }
 
-// cloneSlots performs a deep copy of a DaySlots map.
+// cloneSlots melakukan salinan dalam dari peta DaySlots.
 func cloneSlots(src DaySlots) map[string][]Slot {
 	dst := make(map[string][]Slot, len(src))
 	for day, periods := range src {

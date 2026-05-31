@@ -32,10 +32,13 @@ import {
   ClipboardList,
   ChevronDown,
   ChevronUp,
+  Square,
+  Trash2,
 } from "lucide-react";
 import {
   apiGetDataStatus,
   apiUploadData,
+  apiClearData,
   templateDownloadUrl,
   buildGenerateStreamUrl,
   apiSaveSchedule,
@@ -101,6 +104,24 @@ export default function DashboardPage() {
     } finally {
       setUploadLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  // ── Hapus data ────────────────────────────────────────────────────────────
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearLoading, setClearLoading] = useState(false);
+
+  async function handleClearData() {
+    setClearLoading(true);
+    try {
+      await apiClearData(token);
+      toast.success("Semua data berhasil dihapus");
+      setClearConfirmOpen(false);
+      await fetchStatus();
+    } catch (err) {
+      toast.error(`Gagal menghapus data: ${(err as Error).message}`);
+    } finally {
+      setClearLoading(false);
     }
   }
 
@@ -209,6 +230,14 @@ export default function DashboardPage() {
     });
   }
 
+  function stopGenerate() {
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+    setProgress({ phase: "idle", gaPercent: 0, tsPercent: 0, unplaced: 0, violations: 0, message: "" });
+  }
+
   // ── Save schedule ─────────────────────────────────────────────────────────
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveTitle, setSaveTitle] = useState("");
@@ -314,6 +343,17 @@ export default function DashboardPage() {
                   Upload Data Excel
                 </Button>
               </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-red-200 text-red-600 hover:bg-red-50"
+                disabled={!dataStatus?.teachingAssignments && !dataStatus?.teachers}
+                onClick={() => setClearConfirmOpen(true)}
+              >
+                <Trash2 className="h-4 w-4 mr-1.5" />
+                Hapus Data
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -385,18 +425,30 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Generate button */}
-            <Button
-              onClick={startGenerate}
-              disabled={generating || !dataStatus?.teachingAssignments}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6"
-            >
-              {generating ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Generating...</>
-              ) : (
-                <><Play className="h-4 w-4 mr-2" />Generate Jadwal</>
+            {/* Generate / Stop button */}
+            <div className="flex gap-2">
+              <Button
+                onClick={startGenerate}
+                disabled={generating || !dataStatus?.teachingAssignments}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6"
+              >
+                {generating ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Generating...</>
+                ) : (
+                  <><Play className="h-4 w-4 mr-2" />Generate Jadwal</>
+                )}
+              </Button>
+              {generating && (
+                <Button
+                  variant="outline"
+                  onClick={stopGenerate}
+                  className="border-red-300 text-red-600 hover:bg-red-50 font-semibold"
+                >
+                  <Square className="h-4 w-4 mr-2 fill-current" />
+                  Stop
+                </Button>
               )}
-            </Button>
+            </div>
 
             {/* Progress display */}
             {progress.phase !== "idle" && (
@@ -626,6 +678,32 @@ export default function DashboardPage() {
           </Card>
         )}
       </div>
+
+      {/* ── Konfirmasi hapus data ────────────────────────────────────────────── */}
+      <Dialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-red-700">Hapus Semua Data</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600 py-2">
+            Semua data guru, kelas, mata pelajaran, dan penugasan akan dihapus. Tindakan ini tidak dapat dibatalkan.
+            Jadwal yang sudah tersimpan tidak akan terpengaruh.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClearConfirmOpen(false)}>
+              Batal
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={handleClearData}
+              disabled={clearLoading}
+            >
+              {clearLoading && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Hapus Semua Data
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Save dialog ─────────────────────────────────────────────────────── */}
       <Dialog open={saveOpen} onOpenChange={setSaveOpen}>

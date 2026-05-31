@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -110,7 +111,7 @@ func GAParameterSpecs() []GAParameterSpec {
 	}
 }
 
-// ── Schedule generation context ──────────────────────────────────────────────
+// ── Konteks pembuatan jadwal ──────────────────────────────────────────────────
 
 func buildNewScheduleContext() (*newScheduleBuildContext, error) {
 	assignments, err := findActiveAssignments()
@@ -245,7 +246,7 @@ func toV2ProgressSnapshot(p algorithm.GAProgress, totalGenerations int) GAProgre
 	}
 }
 
-// ── V3 schedule generation (hybrid GA+TS) ────────────────────────────────────
+// ── Generate jadwal V3 (hybrid GA+TS) ────────────────────────────────────────
 
 func DefaultTSParams() TSParams {
 	cfg := algorithm.DefaultTSConfig()
@@ -258,7 +259,7 @@ func DefaultTSParams() TSParams {
 	}
 }
 
-func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, error) {
+func GenerateV3Schedule(ctx context.Context, opts GenerateHybridOptions) (*ScheduleGenerationResult, error) {
 	gaParams := opts.GA
 	if isZeroGAParams(gaParams) {
 		gaParams = DefaultGAParams()
@@ -276,7 +277,7 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, 
 		tsParams.Seed = time.Now().UnixNano()
 	}
 
-	ctx, err := buildNewScheduleContext()
+	sched, err := buildNewScheduleContext()
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +291,7 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, 
 	gaCfg.RandSeed = gaParams.Seed
 	gaCfg.ReportInterval = gaParams.ProgressEvery
 	gaCfg.PatienceLimit = opts.StagnationLimit
-	gaCfg.PJOKSubjID = ctx.pjokID
+	gaCfg.PJOKSubjID = sched.pjokID
 	gaCfg.OnSnapshot = func(p algorithm.GAProgress) {
 		if opts.OnGAProgress != nil {
 			snap := toV2ProgressSnapshot(p, gaParams.Generations)
@@ -306,7 +307,7 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, 
 	tsCfg.RandSeed = tsParams.Seed
 	tsCfg.ShakeCount = tsParams.PerturbCount
 	tsCfg.ShakeAfter = tsParams.PerturbAfter
-	tsCfg.PJOKSubjID = ctx.pjokID
+	tsCfg.PJOKSubjID = sched.pjokID
 	tsCfg.OnSnapshot = func(p algorithm.TSProgress) {
 		if opts.OnTSProgress != nil {
 			opts.OnTSProgress(toTSProgressSnapshot(p, tsParams.Iterations))
@@ -330,16 +331,16 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, 
 			}
 		},
 	}
-	hybridResult := algorithm.RunHybrid(ctx.blocks, ctx.index, nil, hybridCfg)
+	hybridResult := algorithm.RunHybrid(ctx, sched.blocks, sched.index, nil, hybridCfg)
 
-	entries := buildEntriesFromMatrix(ctx.blocks, hybridResult.Matrix, nil, ctx.subjectNames, ctx.teacherNames, ctx.classNames)
-	hybridSoftBd := algorithm.BreakdownSoftViolations(hybridResult.Matrix, ctx.blocks, ctx.pjokID)
+	entries := buildEntriesFromMatrix(sched.blocks, hybridResult.Matrix, nil, sched.subjectNames, sched.teacherNames, sched.classNames)
+	hybridSoftBd := algorithm.BreakdownSoftViolations(hybridResult.Matrix, sched.blocks, sched.pjokID)
 
 	defaultTS := DefaultTSParams()
 	generationResult := &ScheduleGenerationResult{
 		Entries: entries,
 		Meta: ScheduleMeta{
-			Input:          ctx.input,
+			Input:          sched.input,
 			DefaultGA:      DefaultGAParams(),
 			EffectiveGA:    gaParams,
 			DefaultTS:      &defaultTS,
@@ -363,7 +364,7 @@ func GenerateV3Schedule(opts GenerateHybridOptions) (*ScheduleGenerationResult, 
 	return generationResult, nil
 }
 
-// GenerateV3ScheduleReadable runs the hybrid GA+SA and returns the schedule with
+// toTSProgressSnapshot mengubah progres TS internal menjadi format snapshot untuk klien.
 func toTSProgressSnapshot(p algorithm.TSProgress, totalIterations int) TSProgressSnapshot {
 	percent := 0.0
 	if totalIterations > 0 {
@@ -444,7 +445,7 @@ func loadClassNames() (map[uint]string, error) {
 	return m, nil
 }
 
-// ── Utilities ─────────────────────────────────────────────────────────────────
+// ── Fungsi utilitas ───────────────────────────────────────────────────────────
 
 func parseClock(s string) time.Time {
 	t, _ := time.Parse("15:04", s)
@@ -505,8 +506,8 @@ func dayOrder(day string) int {
 }
 
 
-// GenerateV3MultiRun runs the hybrid GA+SA sequentially for the given number of runs
-func GenerateV3MultiRun(runs int, opts GenerateHybridOptions) (*MultiRunResult, error) {
+// GenerateV3MultiRun menjalankan hybrid GA+TS secara berurutan sebanyak jumlah run yang ditentukan.
+func GenerateV3MultiRun(ctx context.Context, runs int, opts GenerateHybridOptions) (*MultiRunResult, error) {
 	if runs <= 0 {
 		runs = 1
 	}
@@ -526,7 +527,7 @@ func GenerateV3MultiRun(runs int, opts GenerateHybridOptions) (*MultiRunResult, 
 		}
 
 		runStart := time.Now()
-		result, err := GenerateV3Schedule(runOpts)
+		result, err := GenerateV3Schedule(ctx, runOpts)
 		if err != nil {
 			return nil, err
 		}

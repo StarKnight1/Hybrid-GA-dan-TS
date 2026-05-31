@@ -6,9 +6,9 @@ import (
 	teachingassignments "smp_mater_dei_be/internal/teaching_assignments"
 )
 
-// GenerateMatrixBlocks converts teaching assignments into schedulable MatrixBlocks.
-// Parallel group blocks (SBP) are placed first in the returned slice so that
-// DecodeChromosome can prioritize them before individual class slots fill up.
+// GenerateMatrixBlocks mengubah penugasan mengajar menjadi MatrixBlock yang dapat dijadwalkan.
+// Blok grup paralel (SBP) ditempatkan pertama dalam slice yang dikembalikan agar
+// DecodeChromosome dapat memprioritaskan mereka sebelum slot kelas lain terisi.
 func GenerateMatrixBlocks(assignments []teachingassignments.TeachingAssignment, pjokSubjectID uint) ([]MatrixBlock, error) {
 	parallelList := make([]MatrixBlock, 0, len(assignments))
 	singleList := make([]MatrixBlock, 0, len(assignments)*2)
@@ -41,9 +41,9 @@ func GenerateMatrixBlocks(assignments []teachingassignments.TeachingAssignment, 
 	return append(parallelList, singleList...), nil
 }
 
-// SplitAssignmentJP breaks a weekly JP total into concrete block durations.
-// PJOK must always be 3 JP and is split into [2, 1] (practical + theory).
-// All other subjects follow the standard decomposition table.
+// SplitAssignmentJP memecah total JP mingguan menjadi durasi blok konkret.
+// PJOK harus selalu 3 JP dan dipecah menjadi [2, 1] (praktik + teori).
+// Mapel lain mengikuti tabel dekomposisi standar.
 func SplitAssignmentJP(jp int, isPJOK bool) ([]int, error) {
 	if isPJOK {
 		if jp != 3 {
@@ -67,11 +67,11 @@ func SplitAssignmentJP(jp int, isPJOK bool) ([]int, error) {
 	return result, nil
 }
 
-// GroupMap maps a GroupKey to the indices of all member blocks within a given block slice.
-// Every block sharing the same GroupKey must be scheduled at the same (Day, StartSlot).
+// GroupIndex memetakan GroupKey ke indeks semua blok anggota dalam slice blok tertentu.
+// Setiap blok yang berbagi GroupKey yang sama harus dijadwalkan pada (Day, StartSlot) yang sama.
 type GroupIndex map[string][]int
 
-// IndexGroups builds a GroupIndex from a block slice by scanning each block's GroupKey.
+// BuildGroupIndex membangun GroupIndex dari slice blok dengan memindai GroupKey setiap blok.
 func BuildGroupIndex(blocks []MatrixBlock) GroupIndex {
 	peta := make(GroupIndex)
 	for posisi, unit := range blocks {

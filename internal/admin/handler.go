@@ -19,7 +19,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// DownloadTemplateHandler serves a pre-filled Excel template for data input.
+// DownloadTemplateHandler mengirim template Excel yang sudah terisi contoh data.
 func DownloadTemplateHandler(c *gin.Context) {
 	f := buildTemplate()
 
@@ -37,7 +37,7 @@ func DownloadTemplateHandler(c *gin.Context) {
 func buildTemplate() *excelize.File {
 	f := excelize.NewFile()
 
-	// ── Common styles ─────────────────────────────────────────────────────────
+	// Gaya umum
 	thinBorder := []excelize.Border{
 		{Type: "left", Color: "CCCCCC", Style: 1},
 		{Type: "right", Color: "CCCCCC", Style: 1},
@@ -101,7 +101,7 @@ func buildTemplate() *excelize.File {
 		}
 	}
 
-	// ── Sheet: Petunjuk ──────────────────────────────────────────────────────
+	// Sheet: Petunjuk
 	instrSheet := "Petunjuk"
 	f.SetSheetName("Sheet1", instrSheet)
 	f.SetColWidth(instrSheet, "A", "A", 80)
@@ -150,7 +150,7 @@ func buildTemplate() *excelize.File {
 	}
 	_ = bodyStyle
 
-	// ── Sheet: Guru ───────────────────────────────────────────────────────────
+	// Sheet: Guru
 	guruSheet := "Guru"
 	f.NewSheet(guruSheet)
 	f.SetColWidth(guruSheet, "A", "A", 6)
@@ -174,7 +174,7 @@ func buildTemplate() *excelize.File {
 	}
 	applyTable(guruSheet, "D1", len(guruSamples), 4)
 
-	// ── Sheet: Kelas (4 columns — added Ada SBP) ─────────────────────────────
+	// Sheet: Kelas
 	kelasSheet := "Kelas"
 	f.NewSheet(kelasSheet)
 	f.SetColWidth(kelasSheet, "A", "A", 6)
@@ -186,7 +186,6 @@ func buildTemplate() *excelize.File {
 	for col, h := range kelasHeaders {
 		f.SetCellValue(kelasSheet, cellName(col+1, 1), h)
 	}
-	// Col: No, Nama, Aktif, Ada SBP
 	kelasData := [][]interface{}{
 		{1, "7A", "Ya", "Ya"}, {2, "7B", "Ya", "Ya"}, {3, "7C", "Ya", "Ya"},
 		{4, "7D", "Ya", "Ya"}, {5, "7E", "Ya", "Ya"}, {6, "7F", "Tidak", "Tidak"},
@@ -200,14 +199,13 @@ func buildTemplate() *excelize.File {
 		for col, val := range row {
 			f.SetCellValue(kelasSheet, cellName(col+1, r), val)
 		}
-		// Apply base row style first
 		last := cellName(4, r)
 		if i%2 == 0 {
 			f.SetCellStyle(kelasSheet, cellName(1, r), last, altStyle)
 		} else {
 			f.SetCellStyle(kelasSheet, cellName(1, r), last, dataStyle)
 		}
-		// Override Ada SBP cell with color-coded style
+		// Warna kolom SBP sesuai nilai
 		sbpVal := fmt.Sprintf("%v", row[3])
 		if strings.ToUpper(sbpVal) == "YA" {
 			f.SetCellStyle(kelasSheet, cellName(4, r), cellName(4, r), sbpYaStyle)
@@ -219,7 +217,7 @@ func buildTemplate() *excelize.File {
 	f.SetCellStyle(kelasSheet, "A1", "D1", hdrStyle)
 	f.SetRowHeight(kelasSheet, 1, 28)
 
-	// ── Sheet: Penugasan (6 columns, no SBP rows) ────────────────────────────
+	// Sheet: Penugasan
 	tugasSheet := "Penugasan"
 	f.NewSheet(tugasSheet)
 	f.SetColWidth(tugasSheet, "A", "A", 5)
@@ -236,7 +234,7 @@ func buildTemplate() *excelize.File {
 	for col, h := range tugasHeaders {
 		f.SetCellValue(tugasSheet, cellName(col+1, 1), h)
 	}
-	applyTable(tugasSheet, "F1", 0, 6) // header only (0 data rows to style)
+	applyTable(tugasSheet, "F1", 0, 6)
 
 	tugasRows := [][]interface{}{
 		{1, 1, "Pancasila", "7D,8A,8B,8C,8D,8E,8F", 3, ""},
@@ -263,7 +261,7 @@ func buildTemplate() *excelize.File {
 	return f
 }
 
-// UploadDataHandler parses the uploaded Excel file and replaces teaching data in the DB.
+// UploadDataHandler memproses file Excel yang diupload dan memperbarui data penugasan di database.
 func UploadDataHandler(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -284,7 +282,7 @@ func UploadDataHandler(c *gin.Context) {
 		return
 	}
 
-	// ── Parse Guru ───────────────────────────────────────────────────────────
+	// Baca data guru
 	guruRows, err := f.GetRows("Guru")
 	if err != nil || len(guruRows) < 2 {
 		response.Fail(c, http.StatusBadRequest, "sheet 'Guru' tidak ditemukan atau kosong", nil)
@@ -317,7 +315,7 @@ func UploadDataHandler(c *gin.Context) {
 		})
 	}
 
-	// ── Parse Kelas ───────────────────────────────────────────────────────────
+	// Baca data kelas
 	kelasRows, err := f.GetRows("Kelas")
 	if err != nil || len(kelasRows) < 2 {
 		response.Fail(c, http.StatusBadRequest, "sheet 'Kelas' tidak ditemukan atau kosong", nil)
@@ -345,7 +343,7 @@ func UploadDataHandler(c *gin.Context) {
 		classList = append(classList, classRow{strings.TrimSpace(row[1]), active, hasSBP})
 	}
 
-	// ── Parse Penugasan ───────────────────────────────────────────────────────
+	// Baca data penugasan
 	tugasRows, err := f.GetRows("Penugasan")
 	if err != nil || len(tugasRows) < 2 {
 		response.Fail(c, http.StatusBadRequest, "sheet 'Penugasan' tidak ditemukan atau kosong", nil)
@@ -373,13 +371,12 @@ func UploadDataHandler(c *gin.Context) {
 		if len(row) >= 6 {
 			groupKey = strings.TrimSpace(row[5])
 		}
-		// column 6 (index 6) is "Keterangan" — informational only, ignored by parser
 
 		subjectName := strings.TrimSpace(row[2])
 		subjectSet[subjectName] = struct{}{}
 		teacherNum := strings.TrimSpace(row[1])
 
-		// Column D accepts comma-separated class names (new format) or a single class (old format).
+		// Kolom kelas bisa diisi beberapa nama dipisah koma
 		for _, rawClass := range strings.Split(row[3], ",") {
 			className := strings.TrimSpace(rawClass)
 			if className == "" {
@@ -395,10 +392,9 @@ func UploadDataHandler(c *gin.Context) {
 		}
 	}
 
-	// ── Persist to DB ─────────────────────────────────────────────────────────
+	// Simpan ke database
 	db := config.DB
 
-	// Upsert teachers
 	if len(teacherList) > 0 {
 		if err := db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "teacher_number"}},
@@ -409,7 +405,6 @@ func UploadDataHandler(c *gin.Context) {
 		}
 	}
 
-	// Upsert classes
 	for _, cr := range classList {
 		name := cr.name
 		grade := 0
@@ -430,7 +425,6 @@ func UploadDataHandler(c *gin.Context) {
 		db.Model(&cl).Update("is_active", cr.active)
 	}
 
-	// Upsert subjects
 	for name := range subjectSet {
 		sub := subjects.Subject{Name: name}
 		if err := db.Where("name = ?", name).FirstOrCreate(&sub).Error; err != nil {
@@ -439,7 +433,7 @@ func UploadDataHandler(c *gin.Context) {
 		}
 	}
 
-	// If any class has SBP, ensure "Seni Budaya" subject will be created.
+	// Pastikan mata pelajaran Seni Budaya ada jika ada kelas SBP
 	for _, cr := range classList {
 		if cr.active && cr.hasSBP {
 			subjectSet["Seni Budaya"] = struct{}{}
@@ -447,7 +441,7 @@ func UploadDataHandler(c *gin.Context) {
 		}
 	}
 
-	// Build lookup maps
+	// Peta ID untuk lookup
 	teacherMap := make(map[string]uint)
 	var allTeachers []teachers.Teacher
 	db.Find(&allTeachers)
@@ -471,7 +465,7 @@ func UploadDataHandler(c *gin.Context) {
 		classInfoMap[cl.Name] = cl
 	}
 
-	// Clear and re-insert teaching assignments
+	// Hapus dan isi ulang penugasan mengajar
 	if err := db.Where("1 = 1").Delete(&teachingassignments.TeachingAssignment{}).Error; err != nil {
 		response.Fail(c, http.StatusInternalServerError, "failed to clear teaching assignments", err.Error())
 		return
@@ -479,7 +473,7 @@ func UploadDataHandler(c *gin.Context) {
 
 	newAssignments := make([]teachingassignments.TeachingAssignment, 0, len(assignList))
 
-	// Regular assignments from Penugasan sheet
+	// Penugasan reguler dari sheet Penugasan
 	for _, a := range assignList {
 		subjectID, ok := subjectMap[a.subject]
 		if !ok {
@@ -514,9 +508,7 @@ func UploadDataHandler(c *gin.Context) {
 		})
 	}
 
-	// Auto-generate SBP assignments for classes flagged with Ada SBP = Ya.
-	// Classes are sorted by grade+code (from allClasses ORDER BY grade, code),
-	// grouped in chunks of up to 3 per grade, each chunk sharing a GroupKey.
+	// Penugasan SBP otomatis: kelas dikelompokkan per tingkat, maks 3/grup
 	sbpSubjectID, hasSBPSubject := subjectMap["Seni Budaya"]
 	if hasSBPSubject {
 		type sbpCls struct {
@@ -525,7 +517,7 @@ func UploadDataHandler(c *gin.Context) {
 			code  string
 		}
 		var sbpClasses []sbpCls
-		for _, cls := range allClasses { // already sorted grade, code
+		for _, cls := range allClasses {
 			cr, found := func() (classRow, bool) {
 				for _, c := range classList {
 					if c.name == cls.Name {
@@ -579,7 +571,7 @@ func UploadDataHandler(c *gin.Context) {
 		}
 	}
 
-	// Count SBP assignments for response
+	// Hitung jumlah penugasan SBP untuk respons
 	sbpCount := 0
 	for _, a := range newAssignments {
 		if a.TeacherID == nil && a.GroupKey != nil {
@@ -596,7 +588,31 @@ func UploadDataHandler(c *gin.Context) {
 	}, "data uploaded successfully")
 }
 
-// DataStatusHandler returns counts of current DB data.
+// ClearDataHandler menghapus permanen semua data yang diupload dari Excel (guru, kelas, mata pelajaran, penugasan).
+func ClearDataHandler(c *gin.Context) {
+	db := config.DB
+
+	if err := db.Unscoped().Where("1 = 1").Delete(&teachingassignments.TeachingAssignment{}).Error; err != nil {
+		response.Fail(c, http.StatusInternalServerError, "gagal menghapus penugasan", err.Error())
+		return
+	}
+	if err := db.Unscoped().Where("1 = 1").Delete(&subjects.Subject{}).Error; err != nil {
+		response.Fail(c, http.StatusInternalServerError, "gagal menghapus mata pelajaran", err.Error())
+		return
+	}
+	if err := db.Unscoped().Where("1 = 1").Delete(&classes.Class{}).Error; err != nil {
+		response.Fail(c, http.StatusInternalServerError, "gagal menghapus kelas", err.Error())
+		return
+	}
+	if err := db.Unscoped().Where("1 = 1").Delete(&teachers.Teacher{}).Error; err != nil {
+		response.Fail(c, http.StatusInternalServerError, "gagal menghapus guru", err.Error())
+		return
+	}
+
+	response.OK(c, nil, "semua data berhasil dihapus")
+}
+
+// DataStatusHandler mengembalikan jumlah data saat ini di database.
 func DataStatusHandler(c *gin.Context) {
 	db := config.DB
 
@@ -607,9 +623,9 @@ func DataStatusHandler(c *gin.Context) {
 	db.Model(&teachingassignments.TeachingAssignment{}).Count(&assignCount)
 
 	response.OK(c, gin.H{
-		"teachers":           teacherCount,
-		"activeClasses":      classCount,
-		"subjects":           subjectCount,
+		"teachers":            teacherCount,
+		"activeClasses":       classCount,
+		"subjects":            subjectCount,
 		"teachingAssignments": assignCount,
 	}, "ok")
 }

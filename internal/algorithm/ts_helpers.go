@@ -4,14 +4,13 @@ import (
 	"math/rand"
 )
 
-// matrixSnapshot records the (Day, StartSlot) of every placed block at a point in time.
-// It allows the Tabu Search to save and restore matrix states efficiently without
-// cloning the full grid structure.
+// matrixSnapshot mencatat posisi (Day, StartSlot) setiap blok yang sudah ditempatkan pada suatu waktu.
+// Memungkinkan Tabu Search menyimpan dan memulihkan state matriks secara efisien tanpa
+// menyalin seluruh struktur grid.
 type matrixSnapshot map[uint]Gene
 
-// captureMatrix reads every block's current placement from the matrix and returns
-// a snapshot. Querying the matrix directly (rather than a placed-block list) ensures
-// the snapshot is always consistent with the true grid state.
+// captureMatrix membaca penempatan blok saat ini dari matriks dan mengembalikan snapshot.
+// Query langsung ke matriks memastikan snapshot selalu konsisten dengan kondisi grid yang sebenarnya.
 func captureMatrix(matrix *ScheduleMatrix, blocks []MatrixBlock) matrixSnapshot {
 	state := make(matrixSnapshot, len(blocks))
 	for _, blk := range blocks {
@@ -22,9 +21,9 @@ func captureMatrix(matrix *ScheduleMatrix, blocks []MatrixBlock) matrixSnapshot 
 	return state
 }
 
-// restoreMatrix builds a fresh ScheduleMatrix from a previously captured snapshot.
-// Blocks absent from the snapshot or whose gene is unplaced are left unscheduled;
-// the returned integer is the count of such blocks.
+// restoreMatrix membangun ScheduleMatrix baru dari snapshot yang sebelumnya diambil.
+// Blok yang tidak ada dalam snapshot atau gennya kosong dibiarkan tanpa jadwal;
+// bilangan bulat yang dikembalikan adalah jumlah blok tersebut.
 func restoreMatrix(snap matrixSnapshot, blocks []MatrixBlock, daySlots DaySlots, pjokSubjectID uint) (*ScheduleMatrix, int) {
 	grid := NewScheduleMatrix(nil, nil, blocks, daySlots)
 	grid.EnableDayDiversity()
@@ -45,8 +44,8 @@ func restoreMatrix(snap matrixSnapshot, blocks []MatrixBlock, daySlots DaySlots,
 	return grid, missing
 }
 
-// snapshotToChromosome converts a placement snapshot into a Chromosome by encoding
-// each block's recorded position as its corresponding gene.
+// snapshotToChromosome mengubah snapshot penempatan menjadi Chromosome dengan mengkodekan
+// posisi setiap blok sebagai gen yang bersesuaian.
 func snapshotToChromosome(snap matrixSnapshot, blocks []MatrixBlock) Chromosome {
 	ch := NewChromosome(len(blocks))
 	for idx, blk := range blocks {
@@ -57,8 +56,8 @@ func snapshotToChromosome(snap matrixSnapshot, blocks []MatrixBlock) Chromosome 
 	return ch
 }
 
-// dropID removes the first occurrence of target from the slice using a swap-with-last
-// strategy. Order is not preserved; returns the original slice when target is absent.
+// dropID menghapus kemunculan pertama target dari slice menggunakan strategi tukar-dengan-terakhir.
+// Urutan tidak dipertahankan; mengembalikan slice asli jika target tidak ditemukan.
 func dropID(slice []uint, target uint) []uint {
 	for idx, val := range slice {
 		if val == target {
@@ -69,9 +68,8 @@ func dropID(slice []uint, target uint) []uint {
 	return slice
 }
 
-// conflictsAt finds all block IDs that would conflict with placing block at (day, startSlot).
-// Both the class grid and (if the block has a teacher) the teacher grid are checked
-// across all slot offsets within the block's duration window.
+// conflictsAt mencari semua ID blok yang akan konflik jika blok ditempatkan pada (day, startSlot).
+// Grid kelas dan (jika blok punya guru) grid guru diperiksa untuk semua offset dalam durasi blok.
 func conflictsAt(matrix *ScheduleMatrix, block MatrixBlock, day string, startSlot int) []uint {
 	seen := make(map[uint]struct{})
 	var result []uint
@@ -99,9 +97,9 @@ func conflictsAt(matrix *ScheduleMatrix, block MatrixBlock, day string, startSlo
 	return result
 }
 
-// findGroupSlot scans candidates in a random order and returns the first Gene where
-// every block in the parallel group can be placed simultaneously. Returns (Gene{}, false)
-// if no such position exists.
+// findGroupSlot memindai kandidat secara acak dan mengembalikan Gen pertama di mana
+// setiap blok dalam grup paralel dapat ditempatkan secara simultan.
+// Mengembalikan (Gene{}, false) jika tidak ada posisi yang ditemukan.
 func findGroupSlot(matrix *ScheduleMatrix, groupIDs []uint, blockByID map[uint]MatrixBlock, candidates []Gene, rng *rand.Rand) (Gene, bool) {
 	if len(candidates) == 0 {
 		return Gene{}, false
@@ -123,8 +121,8 @@ func findGroupSlot(matrix *ScheduleMatrix, groupIDs []uint, blockByID map[uint]M
 	return Gene{}, false
 }
 
-// findOpenSlot scans candidates in a random order and returns the first Gene that is
-// conflict-free for the given single block. Returns (Gene{}, false) if none is found.
+// findOpenSlot memindai kandidat secara acak dan mengembalikan Gen pertama yang bebas konflik
+// untuk satu blok tertentu. Mengembalikan (Gene{}, false) jika tidak ada yang ditemukan.
 func findOpenSlot(matrix *ScheduleMatrix, block MatrixBlock, candidates []Gene, rng *rand.Rand) (Gene, bool) {
 	if len(candidates) == 0 {
 		return Gene{}, false

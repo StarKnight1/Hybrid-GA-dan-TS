@@ -1,9 +1,9 @@
 package algorithm
 
-// MatrixDays lists the five school days in order.
+// MatrixDays mendaftar lima hari sekolah secara berurutan.
 var MatrixDays = []string{"monday", "tuesday", "wednesday", "thursday", "friday"}
 
-// Slot describes one 40-minute teaching period within a school day.
+// Slot mendeskripsikan satu periode mengajar 40 menit dalam satu hari sekolah.
 type Slot struct {
 	Index     int
 	StartTime string
@@ -11,11 +11,11 @@ type Slot struct {
 	IsBlocked bool
 }
 
-// DaySlots maps each school day name to its ordered list of periods.
+// DaySlots memetakan nama hari sekolah ke daftar periode berurutan.
 type DaySlots map[string][]Slot
 
-// buildWeekdayPeriods returns the standard 9-slot layout used Monday–Thursday.
-// When blockFirst is true, slot 0 is marked blocked (used for Monday).
+// buildWeekdayPeriods mengembalikan layout standar 9 slot yang digunakan Senin–Kamis.
+// Jika blockFirst bernilai true, slot 0 ditandai diblokir (dipakai untuk hari Senin).
 func buildWeekdayPeriods(blockFirst bool) []Slot {
 	return []Slot{
 		{0, "07:10", "07:50", blockFirst},
@@ -30,8 +30,8 @@ func buildWeekdayPeriods(blockFirst bool) []Slot {
 	}
 }
 
-// buildFridayPeriods returns the abbreviated Friday slot layout.
-// Slots 6–8 are blocked (Jum'at prayer break), and slot 3 ends earlier.
+// buildFridayPeriods mengembalikan layout slot Jumat yang lebih singkat.
+// Slot 6–8 diblokir (waktu sholat Jumat), dan slot 3 selesai lebih awal.
 func buildFridayPeriods() []Slot {
 	return []Slot{
 		{0, "07:10", "07:50", true},
@@ -46,7 +46,7 @@ func buildFridayPeriods() []Slot {
 	}
 }
 
-// GenerateSlots builds the complete weekly schedule template for all five school days.
+// GenerateSlots membangun template jadwal mingguan lengkap untuk semua lima hari sekolah.
 func GenerateSlots() DaySlots {
 	ds := make(DaySlots, 5)
 	ds["monday"] = buildWeekdayPeriods(true)
@@ -57,8 +57,8 @@ func GenerateSlots() DaySlots {
 	return ds
 }
 
-// MatrixDayIndex returns the ordinal position of a day within MatrixDays,
-// or len(MatrixDays) if the day name is unrecognized.
+// MatrixDayIndex mengembalikan posisi ordinal hari dalam MatrixDays,
+// atau len(MatrixDays) jika nama hari tidak dikenali.
 func MatrixDayIndex(day string) int {
 	for idx, d := range MatrixDays {
 		if d == day {
@@ -68,8 +68,8 @@ func MatrixDayIndex(day string) int {
 	return len(MatrixDays)
 }
 
-// MatrixSlotIndexFromTimeStart looks up the slot index for a given day and start time.
-// Returns (index, true) on success or (0, false) if not found.
+// MatrixSlotIndexFromTimeStart mencari indeks slot berdasarkan hari dan waktu mulai.
+// Mengembalikan (indeks, true) jika berhasil atau (0, false) jika tidak ditemukan.
 func MatrixSlotIndexFromTimeStart(day, timeStart string, daySlots DaySlots) (int, bool) {
 	if daySlots == nil {
 		daySlots = GenerateSlots()

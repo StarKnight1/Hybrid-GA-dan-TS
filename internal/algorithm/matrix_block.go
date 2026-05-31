@@ -1,8 +1,8 @@
 package algorithm
 
-// MatrixBlock represents a single schedulable teaching unit derived from one teaching assignment.
-// Blocks belonging to the same parallel group (e.g. SBP) share a GroupKey and must
-// always occupy the same (Day, StartSlot) in the timetable.
+// MatrixBlock merepresentasikan satu unit pengajaran yang dapat dijadwalkan, berasal dari satu penugasan mengajar.
+// Blok yang termasuk grup paralel yang sama (mis. SBP) berbagi GroupKey dan harus
+// selalu menempati (Day, StartSlot) yang sama dalam jadwal.
 type MatrixBlock struct {
 	ID        uint
 	TeacherID *uint
@@ -12,7 +12,7 @@ type MatrixBlock struct {
 	GroupKey  *string
 }
 
-// NewMatrixBlock constructs a MatrixBlock with the given attributes.
+// NewMatrixBlock membuat MatrixBlock dengan atribut yang diberikan.
 func NewMatrixBlock(id uint, teacherID *uint, subjectID, classID uint, duration int, groupKey *string) MatrixBlock {
 	return MatrixBlock{
 		ID:        id,

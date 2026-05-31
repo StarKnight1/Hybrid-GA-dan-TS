@@ -55,6 +55,10 @@ export async function apiGetDataStatus(token: string) {
   return res.data;
 }
 
+export async function apiClearData(token: string) {
+  await apiFetch("/admin/data", { method: "DELETE", token });
+}
+
 export async function apiUploadData(token: string, file: File) {
   const form = new FormData();
   form.append("file", file);

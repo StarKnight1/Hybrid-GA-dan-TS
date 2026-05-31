@@ -242,7 +242,7 @@ func GenerateV3MultiRunHandler(c *gin.Context) {
 		Restarts:        restarts,
 	}
 
-	result, err := GenerateV3MultiRun(runs, opts)
+	result, err := GenerateV3MultiRun(c.Request.Context(), runs, opts)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "failed to run multi-run schedule generation", err.Error())
 		return
@@ -391,7 +391,7 @@ func GenerateV3MultiRunStreamHandler(c *gin.Context) {
 		}
 
 		runStart := time.Now()
-		result, genErr := GenerateV3Schedule(runOpts)
+		result, genErr := GenerateV3Schedule(c.Request.Context(), runOpts)
 		if genErr != nil {
 			if c.Request.Context().Err() == nil {
 				c.SSEvent("error", gin.H{"run": runNum, "message": genErr.Error()})
@@ -548,7 +548,7 @@ func GenerateV3ScheduleStreamHandler(c *gin.Context) {
 		},
 	}
 
-	result, genErr := GenerateV3Schedule(opts)
+	result, genErr := GenerateV3Schedule(c.Request.Context(), opts)
 	if genErr != nil {
 		if c.Request.Context().Err() == nil {
 			c.SSEvent("error", gin.H{"message": genErr.Error()})

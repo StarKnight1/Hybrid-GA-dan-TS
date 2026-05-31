@@ -11,7 +11,7 @@ func RegisterRoutes(r *gin.Engine) {
 	g.Use(middleware.AuthMiddleware())
 
 	g.GET("", ListHandler)
-	g.GET("/active", GetActiveHandler) // must be before /:id
+	g.GET("/active", GetActiveHandler) // harus didaftarkan sebelum /:id
 	g.GET("/:id", GetHandler)
 	g.GET("/:id/export", ExportHandler)
 

@@ -193,7 +193,7 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 	f := excelize.NewFile()
 	now := time.Now()
 
-	// ── Style definitions ─────────────────────────────────────────────────────
+	// Definisi gaya
 	thinBorder := []excelize.Border{
 		{Type: "left", Color: "BBBBBB", Style: 1},
 		{Type: "right", Color: "BBBBBB", Style: 1},
@@ -207,34 +207,29 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 		{Type: "bottom", Color: "1F538D", Style: 1},
 	}
 
-	// Title banner: large white bold on dark blue
+	// Gaya cover
 	sBanner, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "FFFFFF", Size: 16},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"1F538D"}, Pattern: 1},
+		Font:      &excelize.Font{Bold: true, Color: "FFFFFF", Size: 16},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"1F538D"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
-		Border: blueBorder,
+		Border:    blueBorder,
 	})
-	// School subtitle: bold medium-blue
 	sSubtitle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "2E75B6", Size: 13},
+		Font:      &excelize.Font{Bold: true, Color: "2E75B6", Size: 13},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
-	// Tahun ajar: italic blue
 	sTitleSub, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Italic: true, Color: "1F538D", Size: 12},
+		Font:      &excelize.Font{Italic: true, Color: "1F538D", Size: 12},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
-	// Info label (cover): right-aligned bold blue
 	sInfoLabel, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "1F538D", Size: 11},
+		Font:      &excelize.Font{Bold: true, Color: "1F538D", Size: 11},
 		Alignment: &excelize.Alignment{Horizontal: "right", Vertical: "center"},
 	})
-	// Info value (cover): left-aligned
 	sInfoVal, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Color: "333333", Size: 11},
+		Font:      &excelize.Font{Color: "333333", Size: 11},
 		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
 	})
-	// Stat header: amber bg, white bold
 	sStatHdr, _ := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true, Color: "FFFFFF", Size: 11},
 		Fill: excelize.Fill{Type: "pattern", Color: []string{"F4A800"}, Pattern: 1},
@@ -246,7 +241,6 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 			{Type: "bottom", Color: "F4A800", Style: 1},
 		},
 	})
-	// Stat value: large bold blue on very-light-blue
 	sStatVal, _ := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true, Color: "1F538D", Size: 20},
 		Fill: excelize.Fill{Type: "pattern", Color: []string{"EEF4FF"}, Pattern: 1},
@@ -258,49 +252,45 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 			{Type: "bottom", Color: "2E75B6", Style: 1},
 		},
 	})
-	// Flat sheet / table header: dark blue bg, white bold
+
+	// Gaya tabel
 	sTableHdr, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "FFFFFF", Size: 11},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"1F538D"}, Pattern: 1},
+		Font:      &excelize.Font{Bold: true, Color: "FFFFFF", Size: 11},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"1F538D"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
-		Border: thinBorder,
+		Border:    thinBorder,
 	})
-	// Day headers in per-class sheets: medium blue
 	sDayHdr, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "FFFFFF", Size: 11},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"2E75B6"}, Pattern: 1},
+		Font:      &excelize.Font{Bold: true, Color: "FFFFFF", Size: 11},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"2E75B6"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
-		Border: thinBorder,
+		Border:    thinBorder,
 	})
-	// Time column header
 	sTimeHdr, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "FFFFFF", Size: 11},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"1F538D"}, Pattern: 1},
+		Font:      &excelize.Font{Bold: true, Color: "FFFFFF", Size: 11},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"1F538D"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
-		Border: thinBorder,
+		Border:    thinBorder,
 	})
-	// Time column data: light blue bg, bold
 	sTimeData, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "1F538D", Size: 9},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"DDEEFF"}, Pattern: 1},
+		Font:      &excelize.Font{Bold: true, Color: "1F538D", Size: 9},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"DDEEFF"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
-		Border: thinBorder,
+		Border:    thinBorder,
 	})
-	// Normal data cell: white bg, wrap, centered
 	sDataNorm, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Size: 10},
+		Font:      &excelize.Font{Size: 10},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
-		Border: thinBorder,
+		Border:    thinBorder,
 	})
-	// Alt data cell: very light blue bg, wrap, centered
 	sDataAlt, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Size: 10},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"EEF4FF"}, Pattern: 1},
+		Font:      &excelize.Font{Size: 10},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"EEF4FF"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
-		Border: thinBorder,
+		Border:    thinBorder,
 	})
 
-	// ── Collect data ──────────────────────────────────────────────────────────
+	// Kumpulkan data kelas dan guru
 	classMap := make(map[string][]schedule.ScheduleEntry)
 	teacherSet := make(map[string]struct{})
 	for _, e := range entries {
@@ -315,33 +305,30 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 	}
 	sortStrings(classNames)
 
-	// ── Sheet 1: Ringkasan (Cover) ────────────────────────────────────────────
+	// Sheet: Ringkasan
 	cover := "Ringkasan"
 	f.SetSheetName("Sheet1", cover)
 	f.SetColWidth(cover, "A", "A", 24)
 	f.SetColWidth(cover, "B", "F", 16)
 
-	// Row 1: title banner
 	f.MergeCell(cover, "A1", "F1")
 	f.SetCellValue(cover, "A1", "JADWAL PELAJARAN")
 	f.SetCellStyle(cover, "A1", "F1", sBanner)
 	f.SetRowHeight(cover, 1, 52)
 
-	// Row 2: school name
 	f.MergeCell(cover, "A2", "F2")
 	f.SetCellValue(cover, "A2", "SMP Mater Dei Yogyakarta")
 	f.SetCellStyle(cover, "A2", "F2", sSubtitle)
 	f.SetRowHeight(cover, 2, 30)
 
-	// Row 3: tahun ajar / title
 	f.MergeCell(cover, "A3", "F3")
 	f.SetCellValue(cover, "A3", title)
 	f.SetCellStyle(cover, "A3", "F3", sTitleSub)
 	f.SetRowHeight(cover, 3, 26)
 
-	f.SetRowHeight(cover, 4, 14) // spacer
+	f.SetRowHeight(cover, 4, 14)
 
-	// Rows 5–8: metadata
+	// Baris metadata
 	infoRows := [][]string{
 		{"Dibuat pada:", now.Format("02 January 2006, 15:04 WIB")},
 		{"Total JP terjadwal:", fmt.Sprintf("%d JP", len(entries))},
@@ -358,9 +345,9 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 		f.SetRowHeight(cover, r, 22)
 	}
 
-	f.SetRowHeight(cover, 10, 14) // spacer
+	f.SetRowHeight(cover, 10, 14)
 
-	// Rows 11–12: stat boxes (Total JP | Kelas | Guru)
+	// Kotak statistik
 	statCols := [][2]string{{"A", "B"}, {"C", "D"}, {"E", "F"}}
 	statLabels := []string{"Total JP", "Kelas Dijadwalkan", "Guru Mengajar"}
 	statVals := []interface{}{len(entries), len(classNames), len(teacherSet)}
@@ -379,7 +366,7 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 	f.SetRowHeight(cover, 11, 26)
 	f.SetRowHeight(cover, 12, 48)
 
-	// ── Sheet 2: Semua Data (flat, sorted) ───────────────────────────────────
+	// Sheet: Semua Data
 	flatSheet := "Semua Data"
 	f.NewSheet(flatSheet)
 	f.SetColWidth(flatSheet, "A", "A", 10)
@@ -419,7 +406,7 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 		f.SetRowHeight(flatSheet, row, 18)
 	}
 
-	// ── Per-class sheets ──────────────────────────────────────────────────────
+	// Sheet per kelas
 	dayCol := map[string]int{
 		"monday": 2, "tuesday": 3, "wednesday": 4, "thursday": 5, "friday": 6,
 	}
@@ -431,13 +418,11 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 		f.SetColWidth(sn, "A", "A", 16)
 		f.SetColWidth(sn, "B", "F", 24)
 
-		// Row 1: class banner
 		f.MergeCell(sn, "A1", "F1")
 		f.SetCellValue(sn, "A1", "JADWAL KELAS "+className)
 		f.SetCellStyle(sn, "A1", "F1", sBanner)
 		f.SetRowHeight(sn, 1, 32)
 
-		// Row 2: day headers
 		f.SetCellValue(sn, "A2", "Waktu")
 		f.SetCellStyle(sn, "A2", "A2", sTimeHdr)
 		for col, day := range days {
@@ -447,7 +432,7 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 		}
 		f.SetRowHeight(sn, 2, 28)
 
-		// Collect and sort time slots
+		// Kumpulkan slot waktu unik
 		slotSet := make(map[string]timeSlot)
 		for _, e := range sheetEntries {
 			slotSet[e.TimeStart] = timeSlot{e.TimeStart, e.TimeEnd}
@@ -460,14 +445,13 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 
 		slotRow := make(map[string]int, len(slotList))
 		for i, s := range slotList {
-			row := i + 3 // data starts at row 3
+			row := i + 3
 			slotRow[s.start] = row
 
 			f.SetCellValue(sn, cellName(1, row), s.start+" – "+s.end)
 			f.SetCellStyle(sn, cellName(1, row), cellName(1, row), sTimeData)
 			f.SetRowHeight(sn, row, 44)
 
-			// Pre-style data cells (B–F) for alternating rows
 			last := cellName(6, row)
 			if i%2 == 0 {
 				f.SetCellStyle(sn, cellName(2, row), last, sDataNorm)
@@ -476,7 +460,7 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 			}
 		}
 
-		// Fill schedule entries
+		// Isi data jadwal
 		for _, e := range sheetEntries {
 			row, ok := slotRow[e.TimeStart]
 			if !ok {
@@ -486,7 +470,6 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 			cn := cellName(col, row)
 
 			if e.TeacherName != "" {
-				// Rich text: subject bold+blue, teacher smaller+gray
 				f.SetCellRichText(sn, cn, []excelize.RichTextRun{
 					{
 						Text: e.SubjectName,
@@ -502,14 +485,13 @@ func buildScheduleExcel(title string, entries []schedule.ScheduleEntry) (*exceli
 			}
 		}
 
-		// Freeze class banner row + day header row AND time column
+		// Kunci baris header dan kolom waktu
 		f.SetPanes(sn, &excelize.Panes{
 			Freeze: true, XSplit: 1, YSplit: 2, TopLeftCell: "B3", ActivePane: "bottomRight",
 			Selection: []excelize.Selection{{Pane: "bottomRight", ActiveCell: "B3", SQRef: "B3"}},
 		})
 	}
 
-	// Set active sheet to cover
 	idx, _ := f.GetSheetIndex(cover)
 	f.SetActiveSheet(idx)
 	return f, nil

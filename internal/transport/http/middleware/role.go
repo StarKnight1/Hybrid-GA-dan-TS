@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RequireRole blocks requests whose JWT role claim is not in the allowed list.
-// Must be used after AuthMiddleware().
+// RequireRole memblokir request yang klaim role JWT-nya tidak ada dalam daftar yang diizinkan.
+// Harus digunakan setelah AuthMiddleware().
 func RequireRole(roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		roleAny, exists := c.Get("userRole")

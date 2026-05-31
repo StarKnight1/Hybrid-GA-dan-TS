@@ -37,7 +37,7 @@ import type {
 } from "@/types";
 import { DAYS, DAY_LABELS } from "@/types";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── Fungsi bantu
 
 function getTodayKey(): DayKey {
   const map: Record<number, DayKey> = {
@@ -54,7 +54,7 @@ function sortByTime(entries: ScheduleEntry[]) {
   return [...entries].sort((a, b) => a.timeStart.localeCompare(b.timeStart));
 }
 
-// ── Day-by-day schedule view (shared by student & teacher) ───────────────────
+// ── Komponen jadwal per hari — dipakai siswa dan guru
 
 function DayScheduleView({
   entries,
@@ -77,7 +77,7 @@ function DayScheduleView({
     <div className="space-y-4">
       <p className="text-xs text-gray-400">Jadwal aktif: {activeScheduleTitle}</p>
 
-      {/* Day tabs */}
+      {/* Tab hari */}
       <div className="flex gap-1.5 flex-wrap">
         {DAYS.map((d) => {
           const count = entries.filter((e) => e.day === d).length;
@@ -106,7 +106,7 @@ function DayScheduleView({
         })}
       </div>
 
-      {/* Entries for selected day */}
+      {/* Daftar pelajaran hari dipilih */}
       {dayEntries.length === 0 ? (
         <div className="text-center py-10 text-gray-400">
           <CalendarDays className="h-10 w-10 mx-auto mb-2 opacity-30" />
@@ -119,13 +119,13 @@ function DayScheduleView({
               key={i}
               className="flex items-center gap-3 p-3 rounded-xl bg-white border border-blue-100 shadow-sm"
             >
-              {/* Time */}
+              {/* Waktu */}
               <div className="flex items-center gap-1 text-xs font-mono text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-lg shrink-0 min-w-[110px] justify-center">
                 <Clock className="h-3 w-3" />
                 {e.timeStart}–{e.timeEnd}
               </div>
 
-              {/* Subject */}
+              {/* Mata pelajaran */}
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-blue-900 text-sm truncate">
                   {e.subjectName}
@@ -140,7 +140,7 @@ function DayScheduleView({
   );
 }
 
-// ── Student view ─────────────────────────────────────────────────────────────
+// ── Tampilan siswa
 
 function StudentView({
   token,
@@ -218,7 +218,7 @@ function StudentView({
   );
 }
 
-// ── Teacher view ─────────────────────────────────────────────────────────────
+// ── Tampilan guru
 
 function TeacherView({
   token,
@@ -258,7 +258,7 @@ function TeacherView({
     );
   }
 
-  // Filter by teacherId (most reliable) or fallback to name
+  // Filter berdasarkan ID guru, fallback ke nama jika ID tidak ada
   const myEntries = schedule.entries.filter((e) =>
     profile.teacherId != null
       ? e.teacherId === profile.teacherId
@@ -294,7 +294,7 @@ function TeacherView({
   );
 }
 
-// ── Admin view ───────────────────────────────────────────────────────────────
+// ── Tampilan admin
 
 function AdminView({ token }: { token: string }) {
   const [list, setList] = useState<SavedScheduleListItem[]>([]);
@@ -375,7 +375,7 @@ function AdminView({ token }: { token: string }) {
 
   return (
     <div className="space-y-6">
-      {/* Schedule list */}
+      {/* Daftar jadwal tersimpan */}
       <Card className="border-blue-100">
         <CardHeader className="pb-3 border-b border-blue-50">
           <CardTitle className="flex items-center gap-2 text-blue-800 text-base">
@@ -438,7 +438,7 @@ function AdminView({ token }: { token: string }) {
                     className="flex items-center gap-1.5 shrink-0 ml-3"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {/* Deploy button */}
+                    {/* Tombol terbitkan */}
                     {item.isActive ? (
                       <span className="text-xs text-emerald-600 font-medium px-2">
                         Aktif
@@ -487,7 +487,7 @@ function AdminView({ token }: { token: string }) {
         </CardContent>
       </Card>
 
-      {/* Loading selected */}
+      {/* Loading jadwal dipilih */}
       {selectedLoading && (
         <div className="flex items-center gap-2 text-gray-400 py-4 justify-center">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -495,7 +495,7 @@ function AdminView({ token }: { token: string }) {
         </div>
       )}
 
-      {/* Selected schedule detail */}
+      {/* Detail jadwal dipilih */}
       {selected && !selectedLoading && (
         <Card className="border-blue-100">
           <CardHeader className="pb-3 border-b border-blue-50">
@@ -537,7 +537,7 @@ function AdminView({ token }: { token: string }) {
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Halaman utama
 
 export default function JadwalPage() {
   const { data: session } = useSession();

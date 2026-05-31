@@ -1,20 +1,21 @@
 package algorithm
 
 import (
+	"context"
 	"time"
 )
 
-// HybridConfig holds configuration for the combined GA+TS optimiser.
+// HybridConfig menyimpan konfigurasi untuk optimiser GA+TS gabungan.
 type HybridConfig struct {
-	GA                GAConfig
-	TS                TSConfig
-	ExtraRuns          int            // additional full GA+TS runs beyond the first; 0 = single run
-	RetryUntilFeasible bool           // keep retrying until unplaced == 0; overrides ExtraRuns
-	MaxAttempts        int            // cap on total runs when RetryUntilFeasible=true; 0 = 1000
-	AfterGA           func(GAResult) // callback fired after GA finishes, before TS starts
+	GA                 GAConfig
+	TS                 TSConfig
+	ExtraRuns          int            // jumlah run GA+TS tambahan setelah run pertama; 0 = satu run saja
+	RetryUntilFeasible bool           // terus mencoba sampai unplaced == 0; mengesampingkan ExtraRuns
+	MaxAttempts        int            // batas total run saat RetryUntilFeasible=true; 0 = 1000
+	AfterGA            func(GAResult) // callback setelah GA selesai, sebelum TS dimulai
 }
 
-// HybridOutput is the result of the combined GA+TS optimisation.
+// HybridResult adalah hasil dari optimasi GA+TS gabungan.
 type HybridResult struct {
 	GAPhase        GAResult
 	TSPhase        TSResult
@@ -23,10 +24,10 @@ type HybridResult struct {
 	Unplaced       int
 	SoftViolations int
 	Elapsed        time.Duration
-	Runs           int // total GA+TS runs attempted
+	Runs           int // total run GA+TS yang dilakukan
 }
 
-// DefaultHybridConfig returns a HybridConfig with sensible defaults.
+// DefaultHybridConfig mengembalikan HybridConfig dengan nilai default yang wajar.
 func DefaultHybridConfig() HybridConfig {
 	gaCfg := DefaultGAConfig()
 	gaCfg.PatienceLimit = 100
@@ -36,28 +37,30 @@ func DefaultHybridConfig() HybridConfig {
 	}
 }
 
-// hybridDominates returns true when a is strictly better than b.
+// hybridDominates mengembalikan true jika a lebih baik dari b.
 func hybridDominates(a, b HybridResult) bool {
 	return a.Unplaced < b.Unplaced || (a.Unplaced == b.Unplaced && a.SoftViolations < b.SoftViolations)
 }
 
-// isFeasible returns true when the result has no unplaced blocks.
+// isFeasible mengembalikan true jika hasil tidak memiliki blok yang unplaced.
 func isFeasible(r HybridResult) bool { return r.Unplaced == 0 }
 
-// derivedSeeds produces offset GA and TS seeds for run n to keep runs independent
-// but reproducible given the same base configuration.
+// derivedSeeds menghasilkan seed GA dan TS yang di-offset untuk run ke-n agar setiap run
+// independen namun tetap dapat direproduksi dari konfigurasi dasar yang sama.
 func derivedSeeds(cfg HybridConfig, n int) (gaSeed, tsSeed int64) {
 	return cfg.GA.RandSeed + int64(n)*1234567891,
 		cfg.TS.RandSeed + int64(n)*9876543211
 }
 
-// ExecuteHybrid runs GA→TS sequentially, repeating for ExtraRuns additional attempts.
-// GA explores the solution space globally; TS refines the best GA result using
-// matrix-level local search with a tabu list to prevent cycling.
-// The best result across all runs is returned. Each run uses an offset seed so runs
-// are independent but reproducible. When RetryUntilFeasible is set, the optimiser
-// retries beyond ExtraRuns until either unplaced == 0 or MaxAttempts is reached.
+// RunHybrid menjalankan GA→TS secara berurutan, diulang sebanyak ExtraRuns tambahan.
+// GA menjelajahi ruang solusi secara global; TS memperhalus hasil terbaik GA menggunakan
+// pencarian lokal berbasis matriks dengan daftar tabu untuk mencegah siklus.
+// Hasil terbaik dari semua run dikembalikan. Setiap run menggunakan seed yang di-offset
+// sehingga run bersifat independen namun dapat direproduksi.
+// Jika RetryUntilFeasible diaktifkan, optimiser terus mencoba sampai unplaced == 0
+// atau MaxAttempts tercapai.
 func RunHybrid(
+	ctx context.Context,
 	blocks []MatrixBlock,
 	candidateIndex map[uint][]Gene,
 	daySlots DaySlots,
@@ -69,10 +72,10 @@ func RunHybrid(
 	runWithOffset := func(n int) HybridResult {
 		rc := cfg
 		rc.GA.RandSeed, rc.TS.RandSeed = derivedSeeds(cfg, n)
-		return singleRun(blocks, candidateIndex, daySlots, rc)
+		return singleRun(ctx, blocks, candidateIndex, daySlots, rc)
 	}
 
-	best := singleRun(blocks, candidateIndex, daySlots, cfg)
+	best := singleRun(ctx, blocks, candidateIndex, daySlots, cfg)
 	runs++
 
 	maxRuns := cfg.ExtraRuns
@@ -85,6 +88,9 @@ func RunHybrid(
 	}
 
 	for r := 1; r <= maxRuns; r++ {
+		if ctx.Err() != nil {
+			break
+		}
 		if isFeasible(best) {
 			break
 		}
@@ -100,14 +106,15 @@ func RunHybrid(
 	return best
 }
 
-// singleRun executes one full GA+TS cycle and returns the result.
+// singleRun menjalankan satu siklus penuh GA+TS dan mengembalikan hasilnya.
 func singleRun(
+	ctx context.Context,
 	blocks []MatrixBlock,
 	candidateIndex map[uint][]Gene,
 	daySlots DaySlots,
 	cfg HybridConfig,
 ) HybridResult {
-	gaResult := RunGA(blocks, candidateIndex, daySlots, cfg.GA)
+	gaResult := RunGA(ctx, blocks, candidateIndex, daySlots, cfg.GA)
 
 	if cfg.AfterGA != nil {
 		cfg.AfterGA(gaResult)
@@ -124,7 +131,7 @@ func singleRun(
 		}
 	}
 
-	tsResult := RunTS(gaResult, blocks, candidateIndex, daySlots, cfg.TS)
+	tsResult := RunTS(ctx, gaResult, blocks, candidateIndex, daySlots, cfg.TS)
 
 	return HybridResult{
 		GAPhase:        gaResult,
