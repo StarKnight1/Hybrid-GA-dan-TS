@@ -12,8 +12,8 @@ type TSConfig struct {
 	MaxIterations  int
 	ReportInterval int
 	RandSeed       int64
-	ShakeCount     int  // blocks to evict when stagnant; 0 = disabled
-	ShakeAfter     int  // iterations without improvement before shaking; 0 = disabled
+	ShakeCount     int // blocks to evict when stagnant; 0 = disabled
+	ShakeAfter     int // iterations without improvement before shaking; 0 = disabled
 	PJOKSubjID     uint
 	OnSnapshot     func(TSProgress)
 }
@@ -43,7 +43,7 @@ type TSResult struct {
 func DefaultTSConfig() TSConfig {
 	return TSConfig{
 		Tenure:         15,
-		MaxIterations:  200000,
+		MaxIterations:  300000,
 		ReportInterval: 5000,
 		RandSeed:       time.Now().UnixNano(),
 		ShakeCount:     10,

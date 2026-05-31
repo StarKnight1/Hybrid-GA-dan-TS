@@ -57,12 +57,12 @@ func buildTemplate() *excelize.File {
 	})
 	dataStyle, _ := f.NewStyle(&excelize.Style{
 		Border:    thinBorder,
-		Alignment: &excelize.Alignment{Vertical: "center"},
+		Alignment: &excelize.Alignment{Vertical: "center", WrapText: true},
 	})
 	altStyle, _ := f.NewStyle(&excelize.Style{
 		Fill:      excelize.Fill{Type: "pattern", Color: []string{"EEF4FF"}, Pattern: 1},
 		Border:    thinBorder,
-		Alignment: &excelize.Alignment{Vertical: "center"},
+		Alignment: &excelize.Alignment{Vertical: "center", WrapText: true},
 	})
 	noteStyle, _ := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true, Color: "1F538D", Size: 14},
@@ -73,6 +73,18 @@ func buildTemplate() *excelize.File {
 	})
 	warnStyle, _ := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Italic: true, Color: "FF8C00", Size: 10},
+	})
+	sbpYaStyle, _ := f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Bold: true, Color: "1A6B1A", Size: 10},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"E8F5E9"}, Pattern: 1},
+		Border:    thinBorder,
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
+	})
+	sbpTidakStyle, _ := f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Color: "888888", Size: 10},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"F5F5F5"}, Pattern: 1},
+		Border:    thinBorder,
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
 
 	applyTable := func(sheet string, hdrEnd string, dataRows int, cols int) {
@@ -92,7 +104,7 @@ func buildTemplate() *excelize.File {
 	// ── Sheet: Petunjuk ──────────────────────────────────────────────────────
 	instrSheet := "Petunjuk"
 	f.SetSheetName("Sheet1", instrSheet)
-	f.SetColWidth(instrSheet, "A", "A", 70)
+	f.SetColWidth(instrSheet, "A", "A", 80)
 
 	f.SetCellValue(instrSheet, "A1", "PETUNJUK PENGISIAN DATA JADWAL — SMP Mater Dei")
 	f.SetCellStyle(instrSheet, "A1", "A1", noteStyle)
@@ -101,33 +113,38 @@ func buildTemplate() *excelize.File {
 	lines := []struct {
 		row  int
 		text string
+		sect bool
 		warn bool
 	}{
-		{3, "LANGKAH PENGISIAN:", false},
-		{4, "1. Sheet \"Guru\"      : Isi data setiap guru (nomor unik, nama lengkap, jenis kelamin).", false},
-		{5, "2. Sheet \"Kelas\"     : Isi nama kelas dan status aktif (Ya/Tidak).", false},
-		{6, "3. Sheet \"Penugasan\": Isi penugasan mengajar — satu baris = satu guru × satu kelas × satu mata pelajaran.", false},
-		{7, "4. Upload file ini melalui tombol \"Upload Data Excel\" di halaman Dashboard.", false},
-		{9, "ATURAN PENTING:", false},
-		{10, "• Kolom \"No\" bisa dibiarkan kosong — sistem mengisi otomatis.", false},
-		{11, "• Jenis Kelamin diisi: L (Laki-laki) atau P (Perempuan).", false},
-		{12, "• Aktif (Kelas) diisi: Ya atau Tidak. Kelas \"Tidak\" tidak akan dijadwalkan.", false},
-		{13, "• Nomor Guru pada sheet Penugasan HARUS sesuai dengan sheet Guru.", false},
-		{14, "• JP Per Minggu = jumlah jam pelajaran per minggu (misal: 3).", false},
-		{16, "MATA PELAJARAN PARALEL (SBP / Seni Budaya Paralel):", false},
-		{17, "• Kosongkan kolom Nomor Guru untuk kelas SBP.", false},
-		{18, "• Isi Group Key yang sama untuk semua kelas yang dijadwalkan paralel.", false},
-		{19, "• Contoh Group Key: \"SBP-7-ABC\" untuk kelas 7A, 7B, 7C.", false},
-		{20, "⚠  Jangan mengubah nama sheet atau menghapus baris header!", true},
+		{3, "LANGKAH PENGISIAN:", true, false},
+		{4, "1. Sheet \"Guru\"      : Isi data setiap guru (nomor unik, nama lengkap, jenis kelamin).", false, false},
+		{5, "2. Sheet \"Kelas\"     : Isi nama kelas, status aktif, dan kolom \"Ada SBP\".", false, false},
+		{6, "3. Sheet \"Penugasan\": Isi penugasan mengajar. Satu baris = satu guru, satu mata pelajaran, semua kelas yang diajar (pisahkan koma).", false, false},
+		{7, "4. Upload file melalui tombol \"Upload Data Excel\" di halaman Dashboard.", false, false},
+		{9, "ATURAN PENTING:", true, false},
+		{10, "• Kolom \"No\" boleh kosong — diisi otomatis.", false, false},
+		{11, "• Jenis Kelamin: L (Laki-laki) atau P (Perempuan).", false, false},
+		{12, "• Aktif (Kelas): Ya atau Tidak. Kelas Tidak tidak akan dijadwalkan.", false, false},
+		{13, "• Ada SBP (Kelas): Ya = kelas ikut SBP, Tidak = kelas tidak mendapat SBP.", false, false},
+		{14, "• Nomor Guru pada Penugasan HARUS sesuai nomor di sheet Guru.", false, false},
+		{15, "• JP Per Minggu = jumlah JP per minggu untuk SETIAP kelas yang diajar.", false, false},
+		{16, "• Kolom \"Kelas-kelas\" diisi nama kelas dipisah koma. Contoh: 7A,7B,7C,8A,8B", false, false},
+		{18, "SBP (Seni Budaya Paralel) — OTOMATIS:", true, false},
+		{19, "• SBP TIDAK perlu diisi di sheet Penugasan. Sistem menangani SBP secara otomatis.", false, false},
+		{20, "• Kelas yang kolom \"Ada SBP\" = Ya akan otomatis mendapat 3 JP SBP per minggu.", false, false},
+		{21, "• Kelas dikelompokkan per tingkat (max 3 kelas/grup) dan dijadwalkan paralel (GroupKey otomatis).", false, false},
+		{22, "• Contoh: 7A, 7B, 7C dalam satu grup → jadwal SBP ketiga kelas di slot waktu yang sama.", false, false},
+		{24, "⚠  Jangan mengubah nama sheet atau menghapus baris header!", false, true},
 	}
 	for _, l := range lines {
 		f.SetCellValue(instrSheet, cellName(1, l.row), l.text)
-		if l.warn {
+		switch {
+		case l.warn:
 			f.SetCellStyle(instrSheet, cellName(1, l.row), cellName(1, l.row), warnStyle)
-		} else if l.row == 3 || l.row == 9 || l.row == 16 {
+		case l.sect:
 			f.SetCellStyle(instrSheet, cellName(1, l.row), cellName(1, l.row), hdrStyle)
 			f.SetRowHeight(instrSheet, l.row, 22)
-		} else {
+		default:
 			f.SetCellStyle(instrSheet, cellName(1, l.row), cellName(1, l.row), bodyStyle)
 		}
 	}
@@ -145,73 +162,101 @@ func buildTemplate() *excelize.File {
 	for col, h := range guruHeaders {
 		f.SetCellValue(guruSheet, cellName(col+1, 1), h)
 	}
-	samples := [][]interface{}{
+	guruSamples := [][]interface{}{
 		{1, 1, "Margareta Kamsiati, S.Pd", "P"},
 		{2, 2, "Drs. Antonius Sarjiyono", "L"},
 		{3, 3, "Agustinus Tukiman, S.Pd", "L"},
 	}
-	for i, row := range samples {
+	for i, row := range guruSamples {
 		for col, val := range row {
 			f.SetCellValue(guruSheet, cellName(col+1, i+2), val)
 		}
 	}
-	applyTable(guruSheet, "D1", len(samples), 4)
+	applyTable(guruSheet, "D1", len(guruSamples), 4)
 
-	// ── Sheet: Kelas ──────────────────────────────────────────────────────────
+	// ── Sheet: Kelas (4 columns — added Ada SBP) ─────────────────────────────
 	kelasSheet := "Kelas"
 	f.NewSheet(kelasSheet)
 	f.SetColWidth(kelasSheet, "A", "A", 6)
-	f.SetColWidth(kelasSheet, "B", "B", 18)
+	f.SetColWidth(kelasSheet, "B", "B", 16)
 	f.SetColWidth(kelasSheet, "C", "C", 18)
+	f.SetColWidth(kelasSheet, "D", "D", 20)
 
-	kelasHeaders := []string{"No", "Nama Kelas", "Aktif (Ya/Tidak)"}
+	kelasHeaders := []string{"No", "Nama Kelas", "Aktif (Ya/Tidak)", "Ada SBP (Ya/Tidak)"}
 	for col, h := range kelasHeaders {
 		f.SetCellValue(kelasSheet, cellName(col+1, 1), h)
 	}
+	// Col: No, Nama, Aktif, Ada SBP
 	kelasData := [][]interface{}{
-		{1, "7A", "Ya"}, {2, "7B", "Ya"}, {3, "7C", "Ya"},
-		{4, "7D", "Ya"}, {5, "7E", "Ya"}, {6, "7F", "Tidak"},
-		{7, "8A", "Ya"}, {8, "8B", "Ya"}, {9, "8C", "Ya"},
-		{10, "8D", "Ya"}, {11, "8E", "Ya"}, {12, "8F", "Ya"},
-		{13, "9A", "Ya"}, {14, "9B", "Ya"}, {15, "9C", "Ya"},
-		{16, "9D", "Ya"}, {17, "9E", "Ya"}, {18, "9F", "Tidak"},
+		{1, "7A", "Ya", "Ya"}, {2, "7B", "Ya", "Ya"}, {3, "7C", "Ya", "Ya"},
+		{4, "7D", "Ya", "Ya"}, {5, "7E", "Ya", "Ya"}, {6, "7F", "Tidak", "Tidak"},
+		{7, "8A", "Ya", "Ya"}, {8, "8B", "Ya", "Ya"}, {9, "8C", "Ya", "Ya"},
+		{10, "8D", "Ya", "Ya"}, {11, "8E", "Ya", "Ya"}, {12, "8F", "Ya", "Ya"},
+		{13, "9A", "Ya", "Ya"}, {14, "9B", "Ya", "Ya"}, {15, "9C", "Ya", "Ya"},
+		{16, "9D", "Ya", "Ya"}, {17, "9E", "Ya", "Ya"}, {18, "9F", "Tidak", "Tidak"},
 	}
 	for i, row := range kelasData {
+		r := i + 2
 		for col, val := range row {
-			f.SetCellValue(kelasSheet, cellName(col+1, i+2), val)
+			f.SetCellValue(kelasSheet, cellName(col+1, r), val)
 		}
+		// Apply base row style first
+		last := cellName(4, r)
+		if i%2 == 0 {
+			f.SetCellStyle(kelasSheet, cellName(1, r), last, altStyle)
+		} else {
+			f.SetCellStyle(kelasSheet, cellName(1, r), last, dataStyle)
+		}
+		// Override Ada SBP cell with color-coded style
+		sbpVal := fmt.Sprintf("%v", row[3])
+		if strings.ToUpper(sbpVal) == "YA" {
+			f.SetCellStyle(kelasSheet, cellName(4, r), cellName(4, r), sbpYaStyle)
+		} else {
+			f.SetCellStyle(kelasSheet, cellName(4, r), cellName(4, r), sbpTidakStyle)
+		}
+		f.SetRowHeight(kelasSheet, r, 20)
 	}
-	applyTable(kelasSheet, "C1", len(kelasData), 3)
+	f.SetCellStyle(kelasSheet, "A1", "D1", hdrStyle)
+	f.SetRowHeight(kelasSheet, 1, 28)
 
-	// ── Sheet: Penugasan ──────────────────────────────────────────────────────
+	// ── Sheet: Penugasan (6 columns, no SBP rows) ────────────────────────────
 	tugasSheet := "Penugasan"
 	f.NewSheet(tugasSheet)
-	f.SetColWidth(tugasSheet, "A", "A", 6)
-	f.SetColWidth(tugasSheet, "B", "B", 14)
+	f.SetColWidth(tugasSheet, "A", "A", 5)
+	f.SetColWidth(tugasSheet, "B", "B", 13)
 	f.SetColWidth(tugasSheet, "C", "C", 28)
-	f.SetColWidth(tugasSheet, "D", "D", 14)
-	f.SetColWidth(tugasSheet, "E", "E", 16)
-	f.SetColWidth(tugasSheet, "F", "F", 26)
+	f.SetColWidth(tugasSheet, "D", "D", 46)
+	f.SetColWidth(tugasSheet, "E", "E", 14)
+	f.SetColWidth(tugasSheet, "F", "F", 22)
 
-	tugasHeaders := []string{"No", "Nomor Guru", "Mata Pelajaran", "Nama Kelas", "JP Per Minggu", "Group Key (Opsional)"}
+	tugasHeaders := []string{
+		"No", "Nomor Guru", "Mata Pelajaran",
+		"Kelas-kelas (pisah koma)", "JP Per Minggu", "Group Key (Opsional)",
+	}
 	for col, h := range tugasHeaders {
 		f.SetCellValue(tugasSheet, cellName(col+1, 1), h)
 	}
-	tugasData := [][]interface{}{
-		{1, 1, "Pancasila", "7D", 3, ""},
-		{2, 1, "Pancasila", "8A", 3, ""},
-		{3, 2, "IPA", "8A", 3, ""},
-		{4, 3, "Matematika", "7A", 4, ""},
-		{5, "", "Seni Budaya", "7A", 3, "SBP-7-ABC"},
-		{6, "", "Seni Budaya", "7B", 3, "SBP-7-ABC"},
-		{7, "", "Seni Budaya", "7C", 3, "SBP-7-ABC"},
+	applyTable(tugasSheet, "F1", 0, 6) // header only (0 data rows to style)
+
+	tugasRows := [][]interface{}{
+		{1, 1, "Pancasila", "7D,8A,8B,8C,8D,8E,8F", 3, ""},
+		{2, 2, "IPA", "8A,8B,8C,8D,8E,8F", 3, ""},
+		{3, 3, "IPS", "7A,7B,7C,7D,7E,8D,8E,8F", 4, ""},
+		{4, 4, "Matematika", "7A,7B,7C,7D,7E", 5, ""},
 	}
-	for i, row := range tugasData {
+	for i, row := range tugasRows {
+		r := i + 2
 		for col, val := range row {
-			f.SetCellValue(tugasSheet, cellName(col+1, i+2), val)
+			f.SetCellValue(tugasSheet, cellName(col+1, r), val)
 		}
+		last := cellName(6, r)
+		if i%2 == 0 {
+			f.SetCellStyle(tugasSheet, cellName(1, r), last, altStyle)
+		} else {
+			f.SetCellStyle(tugasSheet, cellName(1, r), last, dataStyle)
+		}
+		f.SetRowHeight(tugasSheet, r, 22)
 	}
-	applyTable(tugasSheet, "F1", len(tugasData), 6)
 
 	idx, _ := f.GetSheetIndex(instrSheet)
 	f.SetActiveSheet(idx)
@@ -282,6 +327,7 @@ func UploadDataHandler(c *gin.Context) {
 	type classRow struct {
 		name   string
 		active bool
+		hasSBP bool
 	}
 	classList := make([]classRow, 0)
 	for _, row := range kelasRows[1:] {
@@ -292,7 +338,11 @@ func UploadDataHandler(c *gin.Context) {
 		if len(row) >= 3 && strings.ToUpper(strings.TrimSpace(row[2])) == "TIDAK" {
 			active = false
 		}
-		classList = append(classList, classRow{strings.TrimSpace(row[1]), active})
+		hasSBP := false
+		if len(row) >= 4 && strings.ToUpper(strings.TrimSpace(row[3])) == "YA" {
+			hasSBP = true
+		}
+		classList = append(classList, classRow{strings.TrimSpace(row[1]), active, hasSBP})
 	}
 
 	// ── Parse Penugasan ───────────────────────────────────────────────────────
@@ -323,15 +373,26 @@ func UploadDataHandler(c *gin.Context) {
 		if len(row) >= 6 {
 			groupKey = strings.TrimSpace(row[5])
 		}
+		// column 6 (index 6) is "Keterangan" — informational only, ignored by parser
+
 		subjectName := strings.TrimSpace(row[2])
 		subjectSet[subjectName] = struct{}{}
-		assignList = append(assignList, assignRow{
-			teacherNum: strings.TrimSpace(row[1]),
-			subject:    subjectName,
-			class:      strings.TrimSpace(row[3]),
-			jp:         jp,
-			groupKey:   groupKey,
-		})
+		teacherNum := strings.TrimSpace(row[1])
+
+		// Column D accepts comma-separated class names (new format) or a single class (old format).
+		for _, rawClass := range strings.Split(row[3], ",") {
+			className := strings.TrimSpace(rawClass)
+			if className == "" {
+				continue
+			}
+			assignList = append(assignList, assignRow{
+				teacherNum: teacherNum,
+				subject:    subjectName,
+				class:      className,
+				jp:         jp,
+				groupKey:   groupKey,
+			})
+		}
 	}
 
 	// ── Persist to DB ─────────────────────────────────────────────────────────
@@ -378,6 +439,14 @@ func UploadDataHandler(c *gin.Context) {
 		}
 	}
 
+	// If any class has SBP, ensure "Seni Budaya" subject will be created.
+	for _, cr := range classList {
+		if cr.active && cr.hasSBP {
+			subjectSet["Seni Budaya"] = struct{}{}
+			break
+		}
+	}
+
 	// Build lookup maps
 	teacherMap := make(map[string]uint)
 	var allTeachers []teachers.Teacher
@@ -394,10 +463,12 @@ func UploadDataHandler(c *gin.Context) {
 	}
 
 	classMap := make(map[string]uint)
+	classInfoMap := make(map[string]classes.Class)
 	var allClasses []classes.Class
-	db.Find(&allClasses)
+	db.Order("grade, code").Find(&allClasses)
 	for _, cl := range allClasses {
 		classMap[cl.Name] = cl.ID
+		classInfoMap[cl.Name] = cl
 	}
 
 	// Clear and re-insert teaching assignments
@@ -407,6 +478,8 @@ func UploadDataHandler(c *gin.Context) {
 	}
 
 	newAssignments := make([]teachingassignments.TeachingAssignment, 0, len(assignList))
+
+	// Regular assignments from Penugasan sheet
 	for _, a := range assignList {
 		subjectID, ok := subjectMap[a.subject]
 		if !ok {
@@ -441,6 +514,64 @@ func UploadDataHandler(c *gin.Context) {
 		})
 	}
 
+	// Auto-generate SBP assignments for classes flagged with Ada SBP = Ya.
+	// Classes are sorted by grade+code (from allClasses ORDER BY grade, code),
+	// grouped in chunks of up to 3 per grade, each chunk sharing a GroupKey.
+	sbpSubjectID, hasSBPSubject := subjectMap["Seni Budaya"]
+	if hasSBPSubject {
+		type sbpCls struct {
+			id    uint
+			grade int
+			code  string
+		}
+		var sbpClasses []sbpCls
+		for _, cls := range allClasses { // already sorted grade, code
+			cr, found := func() (classRow, bool) {
+				for _, c := range classList {
+					if c.name == cls.Name {
+						return c, true
+					}
+				}
+				return classRow{}, false
+			}()
+			if found && cr.active && cr.hasSBP {
+				sbpClasses = append(sbpClasses, sbpCls{cls.ID, cls.Grade, cls.Code})
+			}
+		}
+
+		gradeGroup := make(map[int][]sbpCls)
+		for _, sc := range sbpClasses {
+			gradeGroup[sc.grade] = append(gradeGroup[sc.grade], sc)
+		}
+		for _, grade := range []int{7, 8, 9} {
+			gradeClasses := gradeGroup[grade]
+			for i := 0; i < len(gradeClasses); i += 3 {
+				end := i + 3
+				if end > len(gradeClasses) {
+					end = len(gradeClasses)
+				}
+				group := gradeClasses[i:end]
+				codes := ""
+				for _, sc := range group {
+					codes += sc.code
+				}
+				gk := fmt.Sprintf("SBP-%d-%s", grade, codes)
+				for _, sc := range group {
+					id := sc.id
+					newAssignments = append(newAssignments, teachingassignments.TeachingAssignment{
+						TeacherID: nil,
+						SubjectID: sbpSubjectID,
+						ClassID:   id,
+						JP:        3,
+						GroupKey:  &gk,
+						CreatedBy: "UPLOAD",
+						UpdatedBy: "UPLOAD",
+					})
+				}
+			}
+		}
+	}
+
 	if len(newAssignments) > 0 {
 		if err := db.CreateInBatches(newAssignments, 200).Error; err != nil {
 			response.Fail(c, http.StatusInternalServerError, "failed to insert teaching assignments", err.Error())
@@ -448,11 +579,20 @@ func UploadDataHandler(c *gin.Context) {
 		}
 	}
 
+	// Count SBP assignments for response
+	sbpCount := 0
+	for _, a := range newAssignments {
+		if a.TeacherID == nil && a.GroupKey != nil {
+			sbpCount++
+		}
+	}
+
 	response.OK(c, gin.H{
-		"teachers":    len(teacherList),
-		"classes":     len(classList),
-		"subjects":    len(subjectSet),
-		"assignments": len(newAssignments),
+		"teachers":       len(teacherList),
+		"classes":        len(classList),
+		"subjects":       len(subjectSet),
+		"assignments":    len(newAssignments) - sbpCount,
+		"sbpAssignments": sbpCount,
 	}, "data uploaded successfully")
 }
 

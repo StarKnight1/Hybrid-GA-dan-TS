@@ -9,9 +9,10 @@ import (
 type SavedSchedule struct {
 	ID uint `gorm:"primaryKey;autoIncrement"`
 
-	Title   string `gorm:"not null"`
-	Entries string `gorm:"column:entries_json;type:text;not null"` // JSON array of ScheduleEntry
-	Meta    string `gorm:"column:meta_json;type:text"`             // JSON ScheduleMeta
+	Title    string `gorm:"not null"`
+	Entries  string `gorm:"column:entries_json;type:text;not null"` // JSON array of ScheduleEntry
+	Meta     string `gorm:"column:meta_json;type:text"`             // JSON ScheduleMeta
+	IsActive bool   `gorm:"default:false"`
 
 	CreatedAt time.Time
 	CreatedBy string
@@ -26,4 +27,5 @@ type SavedScheduleListItem struct {
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"createdAt"`
 	CreatedBy string    `json:"createdBy"`
+	IsActive  bool      `json:"isActive"`
 }

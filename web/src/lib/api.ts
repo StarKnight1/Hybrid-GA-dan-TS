@@ -38,7 +38,7 @@ export async function apiLogin(identifier: string, password: string) {
 }
 
 export async function apiGetMe(token: string) {
-  const res = await apiFetch<ApiResponse<{ username: string; role: string }>>(
+  const res = await apiFetch<ApiResponse<import("@/types").UserProfile>>(
     "/users/me",
     { token }
   );
@@ -115,6 +115,18 @@ export async function apiSaveSchedule(
 
 export async function apiDeleteSchedule(token: string, id: number) {
   await apiFetch(`/schedules/${id}`, { method: "DELETE", token });
+}
+
+export async function apiDeploySchedule(token: string, id: number) {
+  await apiFetch(`/schedules/${id}/deploy`, { method: "PUT", token });
+}
+
+export async function apiGetActiveSchedule(token: string) {
+  const res = await apiFetch<ApiResponse<import("@/types").SavedSchedule>>(
+    "/schedules/active",
+    { token }
+  );
+  return res.data;
 }
 
 export function scheduleExportUrl(id: number) {

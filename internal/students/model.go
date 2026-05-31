@@ -22,6 +22,7 @@ type Student struct {
 	Gender     string `gorm:"type:text;check:gender IN ('male','female')"`
 
 	StudentNumber string `gorm:"uniqueIndex;not null"` // NIS
+	ClassID       *uint  `gorm:"index"`               // link to classes table
 
 	CreatedAt time.Time
 	CreatedBy string

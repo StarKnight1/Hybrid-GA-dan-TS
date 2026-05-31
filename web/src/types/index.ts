@@ -53,6 +53,15 @@ export interface SavedScheduleListItem {
   title: string;
   createdAt: string;
   createdBy: string;
+  isActive: boolean;
+}
+
+export interface UserProfile {
+  username: string;
+  role: string;
+  className?: string;   // student only
+  teacherName?: string; // teacher only
+  teacherId?: number;   // teacher only
 }
 
 export interface SavedSchedule {

@@ -76,19 +76,49 @@ func seedDefaultUsers(db *gorm.DB) error {
 	err = db.Where("user_id = ?", studentUser.ID).
 		Attrs(students.Student{
 			UserID:        studentUser.ID,
-			FullName:      "Nathan Angelo Stenlie",
-			Nickname:      "Tan-tan",
+			FullName:      "Andrew Kristanto Mulyono",
+			Nickname:      "Andrew",
 			BirthPlace:    "Pamulang, Tangerang Selatan",
 			BirthDate:     studentBirthDate,
-			Address:       "Jl. Pergiwa Blok D 21 no 2",
-			Phone:         "087775586770",
-			Religion:      "Kristen",
+			Address:       "Jl. Anggur 5 Blok A 34 No. 6",
+			Phone:         "085773838656",
+			Religion:      "Katolik",
 			Gender:        "male",
-			StudentNumber: "123456789",
+			StudentNumber: "32220116",
 		}).
 		FirstOrCreate(&studentProfile).Error
 	if err != nil {
 		return fmt.Errorf("seed sample student profile: %w", err)
+	}
+
+	// Assign student to class 7A if not yet set
+	if studentProfile.ClassID == nil {
+		var class7A classes.Class
+		if err := db.Where("name = ?", "7A").First(&class7A).Error; err == nil {
+			db.Model(&students.Student{}).
+				Where("id = ? AND class_id IS NULL", studentProfile.ID).
+				Update("class_id", class7A.ID)
+		}
+	}
+
+	// Seed dummy teacher user linked to teacher #1 (Margareta Kamsiati)
+	teacherUser := users.User{}
+	err = db.Where(&users.User{LoginIdentifier: "teacher1"}).
+		Attrs(users.User{
+			PasswordHash:    security.HashPassword("password"),
+			Role:            "teacher",
+			LoginIdentifier: "teacher1",
+		}).
+		FirstOrCreate(&teacherUser).Error
+	if err != nil {
+		return fmt.Errorf("seed sample teacher user: %w", err)
+	}
+
+	// Link teacher user to teacher record #1
+	if teacherUser.ID > 0 {
+		db.Model(&teachers.Teacher{}).
+			Where("teacher_number = ? AND (user_id IS NULL OR user_id = ?)", 1, teacherUser.ID).
+			Update("user_id", teacherUser.ID)
 	}
 
 	log.Println("[SEED] default users seeded")
@@ -488,35 +518,8 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		{"28", "PJOK", "8B", 3, ""},
 		{"28", "PJOK", "8C", 3, ""},
 
-		// ── SBP (Seni Budaya) — no teacher assigned ───────────────────────────
-		// Grade 7 group ABC
-		{"", "SBP", "7A", 3, "SBP-7-ABC"},
-		{"", "SBP", "7B", 3, "SBP-7-ABC"},
-		{"", "SBP", "7C", 3, "SBP-7-ABC"},
-
-		// Grade 7 group DE
-		{"", "SBP", "7D", 3, "SBP-7-DE"},
-		{"", "SBP", "7E", 3, "SBP-7-DE"},
-
-		// Grade 8 group ABC
-		{"", "SBP", "8A", 3, "SBP-8-ABC"},
-		{"", "SBP", "8B", 3, "SBP-8-ABC"},
-		{"", "SBP", "8C", 3, "SBP-8-ABC"},
-
-		// Grade 8 group DEF
-		{"", "SBP", "8D", 3, "SBP-8-DEF"},
-		{"", "SBP", "8E", 3, "SBP-8-DEF"},
-		{"", "SBP", "8F", 3, "SBP-8-DEF"},
-
-		// Grade 9 group ABC
-		{"", "SBP", "9A", 3, "SBP-9-ABC"},
-		{"", "SBP", "9B", 3, "SBP-9-ABC"},
-		{"", "SBP", "9C", 3, "SBP-9-ABC"},
-
-		// Grade 9 group DE
-		{"", "SBP", "9D", 3, "SBP-9-DE"},
-		{"", "SBP", "9E", 3, "SBP-9-DE"},
 	}
+	// SBP assignments are auto-generated below from active classes — not hardcoded here.
 
 	var existingAssignments []teachingassignments.TeachingAssignment
 	if err := db.Find(&existingAssignments).Error; err != nil {
@@ -574,17 +577,72 @@ func SeedTeachingAssignments(db *gorm.DB) error {
 		existingSet[key] = struct{}{}
 	}
 
-	if len(assignmentsToCreate) == 0 {
-		log.Println("[SEED] teaching assignments seeded")
-		return nil
+	if len(assignmentsToCreate) > 0 {
+		if err := db.CreateInBatches(assignmentsToCreate, 200).Error; err != nil {
+			return fmt.Errorf("seed teaching assignments: %w", err)
+		}
 	}
 
-	if err := db.CreateInBatches(assignmentsToCreate, 200).Error; err != nil {
-		return fmt.Errorf("seed teaching assignments: %w", err)
+	// Auto-generate SBP assignments for all active classes, grouped by grade in chunks of 3.
+	if err := seedSBPAssignments(db, existingSet, subjectMap, classMap); err != nil {
+		return fmt.Errorf("seed SBP assignments: %w", err)
 	}
 
 	log.Println("[SEED] teaching assignments seeded")
 	return nil
+}
+
+func seedSBPAssignments(db *gorm.DB, existingSet map[string]struct{}, subjectMap map[string]uint, classMap map[string]uint) error {
+	sbpSubjectID, ok := subjectMap["Seni Budaya"]
+	if !ok {
+		return nil // subject not seeded yet — skip
+	}
+
+	var activeClasses []classes.Class
+	if err := db.Where("is_active = true").Order("grade, code").Find(&activeClasses).Error; err != nil {
+		return err
+	}
+
+	gradeGroup := make(map[int][]classes.Class)
+	for _, cls := range activeClasses {
+		gradeGroup[cls.Grade] = append(gradeGroup[cls.Grade], cls)
+	}
+
+	var sbpToCreate []teachingassignments.TeachingAssignment
+	for _, grade := range []int{7, 8, 9} {
+		gradeClasses := gradeGroup[grade]
+		for i := 0; i < len(gradeClasses); i += 3 {
+			group := gradeClasses[i:min(i+3, len(gradeClasses))]
+			codes := ""
+			for _, cls := range group {
+				codes += cls.Code
+			}
+			gk := fmt.Sprintf("SBP-%d-%s", grade, codes)
+			for _, cls := range group {
+				key := buildAssignmentKey(nil, sbpSubjectID, cls.ID, &gk)
+				if _, exists := existingSet[key]; exists {
+					continue
+				}
+				existingSet[key] = struct{}{}
+				gkCopy := gk
+				sbpToCreate = append(sbpToCreate, teachingassignments.TeachingAssignment{
+					TeacherID: nil,
+					SubjectID: sbpSubjectID,
+					ClassID:   cls.ID,
+					JP:        3,
+					GroupKey:  &gkCopy,
+					CreatedBy: "SYSTEM",
+					UpdatedBy: "SYSTEM",
+				})
+			}
+		}
+	}
+	_ = classMap
+
+	if len(sbpToCreate) == 0 {
+		return nil
+	}
+	return db.CreateInBatches(sbpToCreate, 200).Error
 }
 
 func buildAssignmentKey(teacherID *uint, subjectID uint, classID uint, groupKey *string) string {

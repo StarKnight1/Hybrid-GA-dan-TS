@@ -11,6 +11,7 @@ func RegisterRoutes(r *gin.Engine) {
 	g.Use(middleware.AuthMiddleware())
 
 	g.GET("", ListHandler)
+	g.GET("/active", GetActiveHandler) // must be before /:id
 	g.GET("/:id", GetHandler)
 	g.GET("/:id/export", ExportHandler)
 
@@ -19,4 +20,5 @@ func RegisterRoutes(r *gin.Engine) {
 	admin.Use(middleware.RequireRole("admin"))
 	admin.POST("", SaveHandler)
 	admin.DELETE("/:id", DeleteHandler)
+	admin.PUT("/:id/deploy", DeployHandler)
 }

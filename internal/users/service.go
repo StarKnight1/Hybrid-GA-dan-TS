@@ -2,6 +2,7 @@ package users
 
 import (
 	"errors"
+	"smp_mater_dei_be/internal/classes"
 	"smp_mater_dei_be/internal/parents"
 	"smp_mater_dei_be/internal/platform/logging"
 	"smp_mater_dei_be/internal/platform/security"
@@ -45,7 +46,13 @@ func GetProfile(userID string) (any, error) {
 		if err != nil {
 			return dto.ProfileResponse{Username: user.LoginIdentifier, Role: user.Role}, nil
 		}
-		return dto.ProfileResponse{Username: student.FullName, Role: user.Role}, nil
+		className := ""
+		if student.ClassID != nil {
+			if cls, err := classes.GetByID(*student.ClassID); err == nil {
+				className = cls.Name
+			}
+		}
+		return dto.ProfileResponse{Username: student.FullName, Role: user.Role, ClassName: className}, nil
 
 	case "parent":
 		parent, err := parents.GetParentByUserID(userID)
@@ -59,7 +66,12 @@ func GetProfile(userID string) (any, error) {
 		if err != nil {
 			return dto.ProfileResponse{Username: user.LoginIdentifier, Role: user.Role}, nil
 		}
-		return dto.ProfileResponse{Username: teacher.FullName, Role: user.Role}, nil
+		return dto.ProfileResponse{
+			Username:    teacher.FullName,
+			Role:        user.Role,
+			TeacherName: teacher.FullName,
+			TeacherID:   &teacher.ID,
+		}, nil
 
 	default:
 		logging.Logger.Warn("unknown_role", zap.String("userID", userID), zap.String("role", user.Role))
