@@ -44,7 +44,7 @@ type TSResult struct {
 func DefaultTSConfig() TSConfig {
 	return TSConfig{
 		Tenure:         15,
-		MaxIterations:  300000,
+		MaxIterations:  500000,
 		ReportInterval: 5000,
 		RandSeed:       time.Now().UnixNano(),
 		ShakeCount:     10,
@@ -107,7 +107,6 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 	targetBlock := st.blockByID[targetID]
 	candidates := candidateIndex[targetID]
 
-	// Blok grup paralel harus ditempatkan bersama.
 	if groupIDs, isGrouped := st.groupByID[targetID]; isGrouped {
 		if pos, ok := findGroupSlot(st.grid, groupIDs, st.blockByID, candidates, acak); ok {
 			for _, id := range groupIDs {
@@ -135,7 +134,6 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 
 	switch len(conflicts) {
 	case 0:
-		// Penempatan bebas: selalu diterima (net -1 unplaced).
 		if st.grid.PlaceBlock(targetID, pos.Day, pos.StartSlot) == nil {
 			st.unplaced = dropID(st.unplaced, targetID)
 			st.placed = append(st.placed, targetID)
@@ -143,7 +141,6 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 		}
 
 	case 1:
-		// Geser satu: evict satu blok, tempatkan target, coba tempatkan kembali yang di-evict.
 		displacedID := conflicts[0]
 		if _, isGroup := st.groupByID[displacedID]; isGroup {
 			break
@@ -171,13 +168,11 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 			st.placed = append(st.placed, displacedID)
 			forbidMove(st.tabuList, displacedID, origGene, iter, tenure)
 		} else {
-			// Tukar (net 0): terima; catat posisi yang di-evict sebagai tabu.
 			forbidMove(st.tabuList, displacedID, origGene, iter, tenure)
 		}
 		st.currPenalty = CountSoftViolations(st.grid, blocks, pjokID)
 
 	case 2:
-		// Geser dua: evict dua blok; tolak jika keduanya tidak bisa ditempatkan kembali (net +1).
 		d1, d2 := conflicts[0], conflicts[1]
 		if _, ok := st.groupByID[d1]; ok {
 			break
@@ -228,7 +223,6 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 			forbidMove(st.tabuList, d2, origG2, iter, tenure)
 			st.currPenalty = CountSoftViolations(st.grid, blocks, pjokID)
 		} else {
-			// net +1: batalkan sepenuhnya.
 			_ = st.grid.RemoveBlock(targetID)
 			st.placed = dropID(st.placed, targetID)
 			st.unplaced = append(st.unplaced, targetID)
@@ -241,7 +235,6 @@ func handleUnplaced(st *tsState, blocks []MatrixBlock, candidateIndex map[uint][
 	}
 }
 
-// handleSwap mencoba menukar dua blok yang sudah ditempatkan untuk mengurangi penalti ringan.
 func handleSwap(st *tsState, blocks []MatrixBlock, bestUnplaced, bestPenalty, iter, tenure int, pjokID uint, acak *rand.Rand) {
 	if len(st.placed) < 2 {
 		return

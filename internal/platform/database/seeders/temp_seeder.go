@@ -82,14 +82,6 @@ func seedDefaultUsers(db *gorm.DB) error {
 	err = db.Where("user_id = ?", studentUser.ID).
 		Attrs(students.Student{
 			UserID:        studentUser.ID,
-			FullName:      "Andrew Kristanto Mulyono",
-			Nickname:      "Andrew",
-			BirthPlace:    "Pamulang, Tangerang Selatan",
-			BirthDate:     studentBirthDate,
-			Address:       "Jl. Anggur 5 Blok A 34 No. 6",
-			Phone:         "085773838656",
-			Religion:      "Katolik",
-			Gender:        "male",
 			StudentNumber: "32220116",
 		}).
 		FirstOrCreate(&studentProfile).Error
@@ -97,14 +89,24 @@ func seedDefaultUsers(db *gorm.DB) error {
 		return fmt.Errorf("seed sample student profile: %w", err)
 	}
 
-	// Hubungkan siswa ke kelas 7A jika belum ada
-	if studentProfile.ClassID == nil {
-		var class7A classes.Class
-		if err := db.Where("name = ?", "7A").First(&class7A).Error; err == nil {
-			db.Model(&students.Student{}).
-				Where("id = ? AND class_id IS NULL", studentProfile.ID).
-				Update("class_id", class7A.ID)
-		}
+	// Selalu update data profil agar perubahan nama/data seeder diterapkan ke record yang sudah ada.
+	var class7A classes.Class
+	if err := db.Where("name = ?", "7A").First(&class7A).Error; err != nil {
+		return fmt.Errorf("class 7A not found for student seed: %w", err)
+	}
+	err = db.Model(&studentProfile).Updates(students.Student{
+		FullName:   "Andrew Kristanto Mulyono",
+		Nickname:   "Andrew",
+		BirthPlace: "Pamulang, Tangerang Selatan",
+		BirthDate:  studentBirthDate,
+		Address:    "Jl. Anggur 5 Blok A 34 No. 6",
+		Phone:      "085773838656",
+		Religion:   "Katolik",
+		Gender:     "male",
+		ClassID:    &class7A.ID,
+	}).Error
+	if err != nil {
+		return fmt.Errorf("update sample student profile: %w", err)
 	}
 
 	// Akun guru contoh, terhubung ke data guru nomor 1
