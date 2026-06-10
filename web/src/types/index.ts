@@ -60,6 +60,7 @@ export interface UserProfile {
   username: string;
   role: string;
   className?: string;   // student only
+  classId?: number;     // student only
   teacherName?: string; // teacher only
   teacherId?: number;   // teacher only
 }

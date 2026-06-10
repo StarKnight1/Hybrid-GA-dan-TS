@@ -52,7 +52,12 @@ func GetProfile(userID string) (any, error) {
 				className = cls.Name
 			}
 		}
-		return dto.ProfileResponse{Username: student.FullName, Role: user.Role, ClassName: className}, nil
+		return dto.ProfileResponse{
+			Username:  student.FullName,
+			Role:      user.Role,
+			ClassName: className,
+			ClassID:   student.ClassID,
+		}, nil
 
 	case "parent":
 		parent, err := parents.GetParentByUserID(userID)

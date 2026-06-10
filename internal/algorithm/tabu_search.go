@@ -47,8 +47,8 @@ func DefaultTSConfig() TSConfig {
 		MaxIterations:  500000,
 		ReportInterval: 5000,
 		RandSeed:       time.Now().UnixNano(),
-		ShakeCount:     10,
-		ShakeAfter:     15000,
+		ShakeCount:     20,
+		ShakeAfter:     10000,
 	}
 }
 

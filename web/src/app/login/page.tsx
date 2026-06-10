@@ -79,8 +79,10 @@ export default function LoginPage() {
             </div>
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-wide">SMP Mater Dei</h1>
-            <p className="text-blue-200 text-sm mt-0.5">Sistem Penjadwalan Pelajaran</p>
+            <h1 className="text-2xl font-bold text-white tracking-wide leading-tight">
+              Sistem Penjadwalan Pelajaran
+            </h1>
+            <p className="text-blue-200 text-sm mt-1">SMP Mater Dei</p>
             <p className="text-amber-300 text-xs mt-1 italic font-medium tracking-widest uppercase">
               Tota Christi per Mariam
             </p>

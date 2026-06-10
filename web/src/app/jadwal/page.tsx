@@ -180,10 +180,27 @@ function StudentView({
     );
   }
 
-  const myClassName = profile.className ?? "";
-  const myEntries = schedule.entries.filter(
-    (e) => e.className === myClassName
+  if (!profile.classId && !profile.className) {
+    return (
+      <Card className="border-blue-100">
+        <CardContent className="py-16 text-center text-gray-400">
+          <CalendarDays className="h-12 w-12 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">Kelas belum ditetapkan</p>
+          <p className="text-xs mt-1">Akun Anda belum terdaftar di kelas mana pun. Hubungi admin.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Filter by classId (lebih andal) atau fallback ke className
+  const myEntries = schedule.entries.filter((e) =>
+    profile.classId != null ? e.classId === profile.classId : e.className === (profile.className ?? "")
   );
+
+  // Ambil className dari entries jika profile tidak punya (class dihapus tapi jadwal lama masih ada)
+  const displayClassName =
+    profile.className ||
+    (myEntries.length > 0 ? myEntries[0].className : `ID ${profile.classId}`);
 
   return (
     <Card className="border-blue-100">
@@ -194,22 +211,23 @@ function StudentView({
           </div>
           <div>
             <CardTitle className="text-white text-base">
-              Jadwal Kelas {myClassName || "—"}
+              Jadwal Kelas {displayClassName}
             </CardTitle>
             <p className="text-blue-200 text-xs mt-0.5">{profile.username}</p>
           </div>
         </div>
       </CardHeader>
       <CardContent className="pt-4">
-        {myEntries.length === 0 && myClassName ? (
+        {myEntries.length === 0 ? (
           <div className="text-center py-10 text-gray-400">
-            <p>Belum ada jadwal untuk kelas {myClassName}.</p>
+            <CalendarDays className="h-10 w-10 mx-auto mb-2 opacity-30" />
+            <p>Belum ada jadwal untuk kelas {displayClassName}.</p>
           </div>
         ) : (
           <DayScheduleView
             entries={myEntries}
             labelFn={(e) => e.teacherName || "—"}
-            emptyMsg={`Tidak ada pelajaran pada hari ini untuk kelas ${myClassName}.`}
+            emptyMsg={`Tidak ada pelajaran pada hari ini untuk kelas ${displayClassName}.`}
             activeScheduleTitle={schedule.title}
           />
         )}

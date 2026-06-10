@@ -96,7 +96,7 @@ export default function DashboardPage() {
       const res = await apiUploadData(token, file);
       const d = res.data ?? res;
       toast.success(
-        `Upload berhasil: ${d.teachers} guru, ${d.classes} kelas, ${d.assignments} penugasan`
+        `Upload berhasil: ${d.teachers} guru, ${d.classes} kelas, ${d.assignments} penugasan reguler, ${d.sbpAssignments ?? 0} penugasan SBP`
       );
       await fetchStatus();
     } catch (err) {
@@ -155,7 +155,11 @@ export default function DashboardPage() {
       message: "Memulai Genetic Algorithm...",
     });
 
-    const url = buildGenerateStreamUrl(token, { loopUntilFeasible: "true", maxLoops: "5" });
+    const url = buildGenerateStreamUrl(token, {
+      loopUntilFeasible: "true",
+      maxLoops: "15",
+      stagnationLimit: "200",
+    });
     const es = new EventSource(url);
     esRef.current = es;
 

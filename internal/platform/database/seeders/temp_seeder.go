@@ -83,6 +83,7 @@ func seedDefaultUsers(db *gorm.DB) error {
 		Attrs(students.Student{
 			UserID:        studentUser.ID,
 			StudentNumber: "32220116",
+			Gender:        "male",
 		}).
 		FirstOrCreate(&studentProfile).Error
 	if err != nil {

@@ -123,6 +123,8 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-size: 17px;
+    line-height: 1.65;
   }
   html {
     @apply font-sans;

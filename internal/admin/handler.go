@@ -425,19 +425,19 @@ func UploadDataHandler(c *gin.Context) {
 		db.Model(&cl).Update("is_active", cr.active)
 	}
 
-	for name := range subjectSet {
-		sub := subjects.Subject{Name: name}
-		if err := db.Where("name = ?", name).FirstOrCreate(&sub).Error; err != nil {
-			response.Fail(c, http.StatusInternalServerError, fmt.Sprintf("failed to upsert subject %s", name), err.Error())
-			return
-		}
-	}
-
 	// Pastikan mata pelajaran Seni Budaya ada jika ada kelas SBP
 	for _, cr := range classList {
 		if cr.active && cr.hasSBP {
 			subjectSet["Seni Budaya"] = struct{}{}
 			break
+		}
+	}
+
+	for name := range subjectSet {
+		sub := subjects.Subject{Name: name}
+		if err := db.Where("name = ?", name).FirstOrCreate(&sub).Error; err != nil {
+			response.Fail(c, http.StatusInternalServerError, fmt.Sprintf("failed to upsert subject %s", name), err.Error())
+			return
 		}
 	}
 
@@ -579,12 +579,32 @@ func UploadDataHandler(c *gin.Context) {
 		}
 	}
 
+	// Diagnostic: hitung kelas eligible SBP dari classList dan allClasses
+	sbpEligibleFromExcel := 0
+	for _, cr := range classList {
+		if cr.active && cr.hasSBP {
+			sbpEligibleFromExcel++
+		}
+	}
+	sbpMatchedFromDB := 0
+	for _, cls := range allClasses {
+		for _, c := range classList {
+			if c.name == cls.Name && c.active && c.hasSBP {
+				sbpMatchedFromDB++
+				break
+			}
+		}
+	}
+
 	response.OK(c, gin.H{
-		"teachers":       len(teacherList),
-		"classes":        len(classList),
-		"subjects":       len(subjectSet),
-		"assignments":    len(newAssignments) - sbpCount,
-		"sbpAssignments": sbpCount,
+		"teachers":            len(teacherList),
+		"classes":             len(classList),
+		"subjects":            len(subjectSet),
+		"assignments":         len(newAssignments) - sbpCount,
+		"sbpAssignments":      sbpCount,
+		"_dbg_hasSBPSubject":  hasSBPSubject,
+		"_dbg_sbpFromExcel":   sbpEligibleFromExcel,
+		"_dbg_sbpMatchedInDB": sbpMatchedFromDB,
 	}, "data uploaded successfully")
 }
 

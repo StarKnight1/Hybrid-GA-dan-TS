@@ -547,6 +547,8 @@ func GenerateV3MultiRun(ctx context.Context, runs int, opts GenerateHybridOption
 }
 
 func logBlockDiagnostics(blocks []algorithm.MatrixBlock, index map[uint][]algorithm.Gene) {
+	const maxWeeklySlots = 41 // Mon=8 Tue=9 Wed=9 Thu=9 Fri=6
+
 	sbpCount := 0
 	for _, b := range blocks {
 		if b.GroupKey != nil {
@@ -557,6 +559,7 @@ func logBlockDiagnostics(blocks []algorithm.MatrixBlock, index map[uint][]algori
 	minCandidates := int(^uint(0) >> 1)
 	maxCandidates := 0
 	totalCandidates := 0
+	zeroCandidates := 0
 	for _, b := range blocks {
 		n := len(index[b.ID])
 		totalCandidates += n
@@ -565,6 +568,9 @@ func logBlockDiagnostics(blocks []algorithm.MatrixBlock, index map[uint][]algori
 		}
 		if n > maxCandidates {
 			maxCandidates = n
+		}
+		if n == 0 {
+			zeroCandidates++
 		}
 	}
 	avgCandidates := 0.0
@@ -582,9 +588,62 @@ func logBlockDiagnostics(blocks []algorithm.MatrixBlock, index map[uint][]algori
 		}
 	}
 
-	fmt.Printf("[block diag] total=%d sbp=%d non-sbp=%d | candidates: min=%d max=%d avg=%.1f | blocks with ≤3 candidates=%d\n",
+	fmt.Printf("[block diag] total=%d sbp=%d non-sbp=%d | candidates: min=%d max=%d avg=%.1f | blocks with ≤3 candidates=%d | zero-candidate blocks=%d\n",
 		len(blocks), sbpCount, len(blocks)-sbpCount,
-		minCandidates, maxCandidates, avgCandidates, lowCount)
+		minCandidates, maxCandidates, avgCandidates, lowCount, zeroCandidates)
+
+	// log setiap blok dengan 0 kandidat — ini pasti tidak bisa ditempatkan
+	if zeroCandidates > 0 {
+		fmt.Printf("[block diag] ZERO-CANDIDATE BLOCKS (cannot be placed):\n")
+		for _, b := range blocks {
+			if len(index[b.ID]) == 0 {
+				groupKey := "<none>"
+				if b.GroupKey != nil {
+					groupKey = *b.GroupKey
+				}
+				teacherStr := "<nil>"
+				if b.TeacherID != nil {
+					teacherStr = fmt.Sprintf("%d", *b.TeacherID)
+				}
+				fmt.Printf("  blockID=%d classID=%d subjectID=%d teacherID=%s duration=%d groupKey=%s\n",
+					b.ID, b.ClassID, b.SubjectID, teacherStr, b.Duration, groupKey)
+			}
+		}
+	}
+
+	// JP per kelas vs kapasitas mingguan
+	type classLoad struct {
+		totalJP  int
+		blockCnt int
+	}
+	classJP := make(map[uint]*classLoad)
+	for _, b := range blocks {
+		if classJP[b.ClassID] == nil {
+			classJP[b.ClassID] = &classLoad{}
+		}
+		classJP[b.ClassID].totalJP += b.Duration
+		classJP[b.ClassID].blockCnt++
+	}
+
+	overCapacity := 0
+	for classID, load := range classJP {
+		if load.totalJP > maxWeeklySlots {
+			overCapacity++
+			fmt.Printf("[block diag] OVER CAPACITY classID=%d totalJP=%d blocks=%d (max=%d, over by %d)\n",
+				classID, load.totalJP, load.blockCnt, maxWeeklySlots, load.totalJP-maxWeeklySlots)
+			// rincian blok per subjectID untuk kelas yang melebihi kapasitas
+			subjJP := make(map[uint]int)
+			for _, b := range blocks {
+				if b.ClassID == classID {
+					subjJP[b.SubjectID] += b.Duration
+				}
+			}
+			for subjID, jp := range subjJP {
+				fmt.Printf("  -> subjectID=%d totalJP=%d\n", subjID, jp)
+			}
+		}
+	}
+	fmt.Printf("[block diag] classes=%d | over-capacity classes=%d\n", len(classJP), overCapacity)
 }
 
 func isZeroGAParams(p GAParams) bool {

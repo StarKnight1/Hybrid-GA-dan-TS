@@ -21,7 +21,8 @@ export function Nav() {
 
   const links = isAdmin
     ? [
-        { href: "/dashboard", label: "Dashboard" },
+        { href: "/beranda", label: "Beranda" },
+        { href: "/dashboard", label: "Generasi Jadwal" },
         { href: "/jadwal", label: "Jadwal Tersimpan" },
       ]
     : [{ href: "/jadwal", label: "Jadwal" }];

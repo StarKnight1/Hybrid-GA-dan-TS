@@ -15,7 +15,7 @@ export default function Home() {
       return;
     }
     if (session.role === "admin") {
-      router.replace("/dashboard");
+      router.replace("/beranda");
     } else {
       router.replace("/jadwal");
     }
