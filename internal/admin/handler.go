@@ -148,7 +148,6 @@ func buildTemplate() *excelize.File {
 			f.SetCellStyle(instrSheet, cellName(1, l.row), cellName(1, l.row), bodyStyle)
 		}
 	}
-	_ = bodyStyle
 
 	// Sheet: Guru
 	guruSheet := "Guru"
@@ -457,12 +456,10 @@ func UploadDataHandler(c *gin.Context) {
 	}
 
 	classMap := make(map[string]uint)
-	classInfoMap := make(map[string]classes.Class)
 	var allClasses []classes.Class
 	db.Order("grade, code").Find(&allClasses)
 	for _, cl := range allClasses {
 		classMap[cl.Name] = cl.ID
-		classInfoMap[cl.Name] = cl
 	}
 
 	// Hapus dan isi ulang penugasan mengajar
@@ -511,6 +508,11 @@ func UploadDataHandler(c *gin.Context) {
 	// Penugasan SBP otomatis: kelas dikelompokkan per tingkat, maks 3/grup
 	sbpSubjectID, hasSBPSubject := subjectMap["Seni Budaya"]
 	if hasSBPSubject {
+		classListMap := make(map[string]classRow, len(classList))
+		for _, cr := range classList {
+			classListMap[cr.name] = cr
+		}
+
 		type sbpCls struct {
 			id    uint
 			grade int
@@ -518,15 +520,7 @@ func UploadDataHandler(c *gin.Context) {
 		}
 		var sbpClasses []sbpCls
 		for _, cls := range allClasses {
-			cr, found := func() (classRow, bool) {
-				for _, c := range classList {
-					if c.name == cls.Name {
-						return c, true
-					}
-				}
-				return classRow{}, false
-			}()
-			if found && cr.active && cr.hasSBP {
+			if cr, found := classListMap[cls.Name]; found && cr.active && cr.hasSBP {
 				sbpClasses = append(sbpClasses, sbpCls{cls.ID, cls.Grade, cls.Code})
 			}
 		}
@@ -579,32 +573,12 @@ func UploadDataHandler(c *gin.Context) {
 		}
 	}
 
-	// Diagnostic: hitung kelas eligible SBP dari classList dan allClasses
-	sbpEligibleFromExcel := 0
-	for _, cr := range classList {
-		if cr.active && cr.hasSBP {
-			sbpEligibleFromExcel++
-		}
-	}
-	sbpMatchedFromDB := 0
-	for _, cls := range allClasses {
-		for _, c := range classList {
-			if c.name == cls.Name && c.active && c.hasSBP {
-				sbpMatchedFromDB++
-				break
-			}
-		}
-	}
-
 	response.OK(c, gin.H{
-		"teachers":            len(teacherList),
-		"classes":             len(classList),
-		"subjects":            len(subjectSet),
-		"assignments":         len(newAssignments) - sbpCount,
-		"sbpAssignments":      sbpCount,
-		"_dbg_hasSBPSubject":  hasSBPSubject,
-		"_dbg_sbpFromExcel":   sbpEligibleFromExcel,
-		"_dbg_sbpMatchedInDB": sbpMatchedFromDB,
+		"teachers":       len(teacherList),
+		"classes":        len(classList),
+		"subjects":       len(subjectSet),
+		"assignments":    len(newAssignments) - sbpCount,
+		"sbpAssignments": sbpCount,
 	}, "data uploaded successfully")
 }
 

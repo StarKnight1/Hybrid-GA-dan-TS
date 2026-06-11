@@ -10,7 +10,7 @@ export interface ScheduleEntry {
   subjectId: number;
   classId: number;
   subjectName: string;
-  teacherName: string;
+  teacherName: string | null;
   className: string;
   day: string;
   timeStart: string;

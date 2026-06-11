@@ -683,3 +683,63 @@ func validateGAParams(p GAParams) error {
 	}
 	return nil
 }
+
+// GenerateGAOnlySchedule menjalankan hanya fase GA tanpa Tabu Search. Digunakan untuk testing.
+func GenerateGAOnlySchedule(ctx context.Context, opts GenerateScheduleOptions) (*ScheduleGenerationResult, error) {
+	gaParams := opts.Params
+	if isZeroGAParams(gaParams) {
+		gaParams = DefaultGAParams()
+	}
+	gaParams = ensureSeed(gaParams)
+	if err := validateGAParams(gaParams); err != nil {
+		return nil, err
+	}
+
+	sched, err := buildNewScheduleContext()
+	if err != nil {
+		return nil, err
+	}
+
+	gaCfg := algorithm.DefaultGAConfig()
+	gaCfg.PopSize = gaParams.PopulationSize
+	gaCfg.MaxGenerations = gaParams.Generations
+	gaCfg.MutationProb = gaParams.MutationRate
+	gaCfg.EliteSize = gaParams.EliteCount
+	gaCfg.TournSize = gaParams.TournamentSize
+	gaCfg.RandSeed = gaParams.Seed
+	gaCfg.ReportInterval = gaParams.ProgressEvery
+	gaCfg.PJOKSubjID = sched.pjokID
+	gaCfg.OnSnapshot = func(p algorithm.GAProgress) {
+		if opts.OnProgress != nil {
+			snap := toV2ProgressSnapshot(p, gaParams.Generations)
+			snap.StagnantGens = p.StagnantGens
+			opts.OnProgress(snap)
+		}
+	}
+
+	gaResult := algorithm.RunGA(ctx, sched.blocks, sched.index, nil, gaCfg)
+
+	entries := buildEntriesFromMatrix(sched.blocks, gaResult.Matrix, nil, sched.subjectNames, sched.teacherNames, sched.classNames)
+	softBd := algorithm.BreakdownSoftViolations(gaResult.Matrix, sched.blocks, sched.pjokID)
+
+	return &ScheduleGenerationResult{
+		Entries: entries,
+		Meta: ScheduleMeta{
+			Input:          sched.input,
+			DefaultGA:      DefaultGAParams(),
+			EffectiveGA:    gaParams,
+			TotalElapsedMs: gaResult.Elapsed.Milliseconds(),
+			Result: ResultStats{
+				EntriesGenerated: len(entries),
+				BestFitness:      gaResult.Unplaced,
+				Violations:       gaResult.SoftViolations,
+				Unplaced:         gaResult.Unplaced,
+				SoftBreakdown: SoftBreakdown{
+					SameDaySplit:        softBd.DaySplitCount,
+					SameDaySplitGrouped: softBd.DaySplitGroupCount,
+					PJOKAfterDeadline:   softBd.PJOKOvertime,
+				},
+			},
+		},
+	}, nil
+}

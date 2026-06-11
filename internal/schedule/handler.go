@@ -566,3 +566,70 @@ func GenerateV3ScheduleStreamHandler(c *gin.Context) {
 		flusher.Flush()
 	}
 }
+
+// GenerateGAOnlyStreamHandler menjalankan hanya fase GA (tanpa Tabu Search) dan stream hasilnya.
+// Digunakan untuk testing perbandingan performa GA saja vs hybrid GA+TS.
+func GenerateGAOnlyStreamHandler(c *gin.Context) {
+	start := time.Now()
+	gaOpts, err := parseGenerateScheduleOptions(c)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
+		return
+	}
+
+	logToTerminal, err := parseBoolQuery(c, "logToTerminal", true)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid query parameters", err.Error())
+		return
+	}
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		response.Fail(c, http.StatusInternalServerError, "streaming unsupported", "response writer does not implement http.Flusher")
+		return
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+
+	c.SSEvent("started", gin.H{
+		"effectiveGa": gaOpts.Params,
+		"defaultGa":   DefaultGAParams(),
+		"mode":        "ga-only",
+	})
+	flusher.Flush()
+
+	opts := GenerateScheduleOptions{
+		Params: gaOpts.Params,
+		OnProgress: func(p GAProgressSnapshot) {
+			if c.Request.Context().Err() != nil {
+				return
+			}
+			if logToTerminal {
+				logProgressSnapshot("ga_only", p)
+			}
+			c.SSEvent("ga_progress", p)
+			flusher.Flush()
+		},
+	}
+
+	result, genErr := GenerateGAOnlySchedule(c.Request.Context(), opts)
+	if genErr != nil {
+		if c.Request.Context().Err() == nil {
+			c.SSEvent("error", gin.H{"message": genErr.Error()})
+			flusher.Flush()
+		}
+		return
+	}
+
+	if c.Request.Context().Err() == nil {
+		result.Meta.TotalElapsedMs = time.Since(start).Milliseconds()
+		if logToTerminal {
+			logScheduleGenerationSummary(result)
+		}
+		c.SSEvent("completed", result)
+		flusher.Flush()
+	}
+}

@@ -46,7 +46,7 @@ type GAResult struct {
 func DefaultGAConfig() GAConfig {
 	return GAConfig{
 		PopSize:        100,
-		MaxGenerations: 2000,
+		MaxGenerations: 1000,
 		MutationProb:   0.02,
 		EliteSize:      5,
 		TournSize:      3,

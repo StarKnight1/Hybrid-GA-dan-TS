@@ -142,38 +142,12 @@ func BreakdownSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokS
 	return bd
 }
 
-// CountSoftViolations menghitung total pelanggaran ringan berbobot untuk matriks hasil decode.
-// Versi cepat untuk inner loop GA — alokasi minimal.
-// Panggil BreakdownSoftViolations hanya untuk pelaporan.
-func CountSoftViolations(matrix *ScheduleMatrix, blocks []MatrixBlock, pjokSubjectID uint) int {
-	total := 0
-
-	classSubjectBlocks := make(map[courseDayKey][]uint)
-	for _, b := range blocks {
-		if pjokSubjectID != 0 && b.SubjectID == pjokSubjectID {
-			continue
-		}
-		k := courseDayKey{b.ClassID, b.SubjectID}
-		classSubjectBlocks[k] = append(classSubjectBlocks[k], b.ID)
-	}
-	for _, ids := range classSubjectBlocks {
-		if len(ids) < 2 {
-			continue
-		}
-		hitPerDay := make(map[string]int)
-		for _, id := range ids {
-			if rec, ok := matrix.Placement(id); ok {
-				hitPerDay[rec.Day]++
-			}
-		}
-		for _, cnt := range hitPerDay {
-			if cnt > 1 {
-				total += cnt - 1
-			}
-		}
-	}
-
-	return total
+// CountSoftViolations selalu mengembalikan 0 karena Day Diversity (hard constraint) mencegah
+// penempatan blok (kelas, mapel) yang sama pada hari yang sama. Setiap potensi konflik
+// diselesaikan saat penempatan — blok menjadi unplaced, bukan placed-with-violation.
+// Fungsi ini dipertahankan untuk kompatibilitas API; gunakan BreakdownSoftViolations untuk pelaporan.
+func CountSoftViolations(_ *ScheduleMatrix, _ []MatrixBlock, _ uint) int {
+	return 0
 }
 
 // ── Indeks kandidat ───────────────────────────────────────────────────────────
