@@ -28,7 +28,7 @@ export default function LoginPage() {
       });
 
       if (result?.error) {
-        toast.error("Login gagal. Periksa username dan password.");
+        toast.error("Login gagal. Periksa kembali username dan password.");
       } else {
         router.replace("/");
       }
